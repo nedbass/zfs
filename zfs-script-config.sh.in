@@ -23,6 +23,7 @@ ETCDIR=${SRCDIR}/etc
 ZDB=${CMDDIR}/zdb/zdb
 ZFS=${CMDDIR}/zfs/zfs
 ZINJECT=${CMDDIR}/zinject/zinject
+ZEVENTD=${CMDDIR}/zeventd/zeventd
 ZPOOL=${CMDDIR}/zpool/zpool
 ZPOOL_ID=${CMDDIR}/zpool_id/zpool_id
 ZTEST=${CMDDIR}/ztest/ztest

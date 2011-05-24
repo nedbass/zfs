@@ -2986,6 +2986,9 @@ vdev_set_state(vdev_t *vd, boolean_t isopen, vdev_state_t state, vdev_aux_t aux)
 	} else if (state == VDEV_STATE_REMOVED) {
 		vd->vdev_removed = B_TRUE;
 	} else if (state == VDEV_STATE_CANT_OPEN) {
+		const char *class;
+		class = FM_EREPORT_ZFS_DEVICE_CORRUPT_DATA;
+		zfs_ereport_post(class, spa, vd, NULL, save_state, 0);
 		/*
 		 * If we fail to open a vdev during an import or recovery, we
 		 * mark it as "not available", which signifies that it was
