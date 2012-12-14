@@ -662,4 +662,27 @@ test_10() {
 }
 run_test 10 "zpool add/remove vdev"
 
+test_11() {
+	local POOL_NAME=tank
+	local FS_NAME=fish
+	local SNAP_NAME=snap
+	local FULL_NAME=${POOL_NAME}/${FS_NAME}
+	local FILE1=/${POOL_NAME}/${FS_NAME}/file1
+	local FILE2=/${POOL_NAME}/${FS_NAME}/file2
+	local TMP_CACHE=`mktemp -p /tmp zpool.cache.XXXXXXXX`
+
+	# Create a pool and volume.
+	${ZFS_SH} zfs="spa_config_path=${TMP_CACHE}" || fail 1
+	${ZPOOL_CREATE_SH} -p ${POOL_NAME} -c lo-raid0 || fail 2
+	${ZFS} create ${POOL_NAME}/${FS_NAME} || fail 3
+	${ZFS} snap ${POOL_NAME}/${FS_NAME}@${SNAP_NAME} || fail 4
+	touch ${FILE1} || fail 5
+	tail -f ${FILE1} &
+	sleep 1
+	${ZFS} rollback ${POOL_NAME}/${FS_NAME}@${SNAP_NAME} || fail 6
+	sleep 1
+	touch ${FILE2} || fail 7
+}
+run_test 11 "zfs rollback with open file"
+
 exit 0
