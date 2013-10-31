@@ -566,6 +566,7 @@ sa_find_sizes(sa_os_t *sa, sa_bulk_attr_t *attr_desc, int attr_count,
 	int full_space;
 	int hdrsize;
 	int extra_hdrsize;
+	dnode_t *dn;
 
 	if (buftype == SA_BONUS && sa->sa_force_spill) {
 		*total = 0;
@@ -582,7 +583,15 @@ sa_find_sizes(sa_os_t *sa, sa_bulk_attr_t *attr_desc, int attr_count,
 	hdrsize = (SA_BONUSTYPE_FROM_DB(db) == DMU_OT_ZNODE) ? 0 :
 	    sizeof (sa_hdr_phys_t);
 
-	full_space = (buftype == SA_BONUS) ? DN_MAX_BONUSLEN : db->db_size;
+	if (buftype == SA_BONUS) {
+		dmu_buf_impl_t *dbi = (dmu_buf_impl_t *)db;
+		DB_DNODE_ENTER(dbi);
+		dn = DB_DNODE(dbi);
+		full_space = DN_BONUS_SIZE(dn->dn_count);
+		DB_DNODE_EXIT(dbi);
+	} else {
+		full_space = db->db_size;
+	}
 	ASSERT(IS_P2ALIGNED(full_space, 8));
 
 	for (i = 0; i != attr_count; i++) {
