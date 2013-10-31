@@ -79,11 +79,18 @@ extern "C" {
 /*
  * Derived constants.
  */
-#define	DNODE_SIZE	(1 << DNODE_SHIFT)
-#define	DN_MAX_NBLKPTR	((DNODE_SIZE - DNODE_CORE_SIZE) >> SPA_BLKPTRSHIFT)
-#define	DN_MAX_BONUSLEN	(DNODE_SIZE - DNODE_CORE_SIZE - (1 << SPA_BLKPTRSHIFT))
+#define	DNODE_MIN_SIZE		(1 << DNODE_SHIFT)
+#define	DNODE_MAX_SIZE		(1 << DNODE_BLOCK_SHIFT)
+#define	DNODE_BLOCK_SIZE	(1 << DNODE_BLOCK_SHIFT)
+#define	DNODE_MIN_COUNT		(DNODE_MIN_SIZE >> DNODE_SHIFT)
+#define	DNODE_MAX_COUNT		(DNODE_MAX_SIZE >> DNODE_SHIFT)
+#define	DN_BONUS_SIZE(count)	(((count) << DNODE_SHIFT) - DNODE_CORE_SIZE - \
+	(1 << SPA_BLKPTRSHIFT))
+#define	DN_OLD_MAX_BONUSLEN	(DN_BONUS_SIZE(DNODE_MIN_COUNT))
+#define	DN_MAX_BONUSLEN		(DN_BONUS_SIZE(DNODE_MAX_COUNT))
+#define	DN_MAX_NBLKPTR	((DNODE_MIN_SIZE - DNODE_CORE_SIZE) >> SPA_BLKPTRSHIFT)
 #define	DN_MAX_OBJECT	(1ULL << DN_MAX_OBJECT_SHIFT)
-#define	DN_ZERO_BONUSLEN	(DN_MAX_BONUSLEN + 1)
+#define	DN_ZERO_BONUSLEN	(DN_BONUS_SIZE(DNODE_MAX_COUNT) + 1)
 #define	DN_KILL_SPILLBLK (1)
 
 #define	DNODES_PER_BLOCK_SHIFT	(DNODE_BLOCK_SHIFT - DNODE_SHIFT)
@@ -100,6 +107,10 @@ extern "C" {
 
 #define	DN_USED_BYTES(dnp) (((dnp)->dn_flags & DNODE_FLAG_USED_BYTES) ? \
 	(dnp)->dn_used : (dnp)->dn_used << SPA_MINBLOCKSHIFT)
+
+#define	DN_BONUSLEN_TO_COUNT(len)	((P2ROUNDUP((len) + \
+	(1 << SPA_BLKPTRSHIFT) + DNODE_CORE_SIZE, DNODE_MIN_SIZE)) >> \
+	DNODE_SHIFT)
 
 #define	EPB(blkshift, typeshift)	(1 << (blkshift - typeshift))
 
@@ -131,7 +142,8 @@ typedef struct dnode_phys {
 	uint8_t dn_flags;		/* DNODE_FLAG_* */
 	uint16_t dn_datablkszsec;	/* data block size in 512b sectors */
 	uint16_t dn_bonuslen;		/* length of dn_bonus */
-	uint8_t dn_pad2[4];
+	uint8_t dn_nextra;		/* # of subsequent dnodes consumed */
+	uint8_t dn_pad2[3];
 
 	/* accounting is protected by dn_dirty_mtx */
 	uint64_t dn_maxblkid;		/* largest allocated block ID */
@@ -140,8 +152,11 @@ typedef struct dnode_phys {
 	uint64_t dn_pad3[4];
 
 	/*
-	 * The tail region is 448 bytes, and there are three ways to
-	 * look at it.
+	 * The tail region is 448 bytes for a 512 byte dnode, and
+	 * correspondingly larger for larger dnode sizes. The spill
+	 * block pointer, when present, is always at the end of the tail
+	 * region. There are three ways this space may be used, using
+	 * a 512 byte dnode for this diagram:
 	 *
 	 * 0       64      128     192     256     320     384     448 (offset)
 	 * +---------------+---------------+---------------+-------+
@@ -149,22 +164,26 @@ typedef struct dnode_phys {
 	 * +---------------+---------------+---------------+-------+
 	 * | dn_blkptr[0]  | dn_bonus[0..319]                      |
 	 * +---------------+-----------------------+---------------+
-	 * | dn_blkptr[0]  | /                     | dn_spill      |
+	 * | dn_blkptr[0]  | dn_bonus[0..191]      | dn_spill      |
 	 * +---------------+-----------------------+---------------+
 	 */
 	union {
-		blkptr_t dn_blkptr[1+DN_MAX_BONUSLEN/sizeof (blkptr_t)];
+		blkptr_t dn_blkptr[1+DN_OLD_MAX_BONUSLEN/sizeof (blkptr_t)];
 		struct {
 			blkptr_t __dn_ignore1;
-			uint8_t dn_bonus[DN_MAX_BONUSLEN];
+			uint8_t dn_bonus[DN_OLD_MAX_BONUSLEN];
 		};
 		struct {
 			blkptr_t __dn_ignore2;
-			uint8_t __dn_ignore3[DN_MAX_BONUSLEN-sizeof (blkptr_t)];
+			uint8_t dn_bonus[DN_OLD_MAX_BONUSLEN -
+			    sizeof (blkptr_t)];
 			blkptr_t dn_spill;
 		};
 	};
 } dnode_phys_t;
+
+#define	DN_SPILL_BLKPTR(dnp)	(blkptr_t *)((char *)(dnp) + \
+	(((dnp)->dn_nextra + 1) << DNODE_SHIFT) - (1 << SPA_BLKPTRSHIFT))
 
 typedef struct dnode {
 	/*
@@ -202,6 +221,7 @@ typedef struct dnode {
 	uint32_t dn_datablksz;		/* in bytes */
 	uint64_t dn_maxblkid;
 	uint8_t dn_next_type[TXG_SIZE];
+	uint8_t dn_count;		/* metadnode slots consumed on disk */
 	uint8_t dn_next_nblkptr[TXG_SIZE];
 	uint8_t dn_next_nlevels[TXG_SIZE];
 	uint8_t dn_next_indblkshift[TXG_SIZE];
@@ -299,7 +319,7 @@ void dnode_rm_spill(dnode_t *dn, dmu_tx_t *tx);
 
 int dnode_hold(struct objset *dd, uint64_t object,
     void *ref, dnode_t **dnp);
-int dnode_hold_impl(struct objset *dd, uint64_t object, int flag,
+int dnode_hold_impl(struct objset *dd, uint64_t object, int flag, int sectors,
     void *ref, dnode_t **dnp);
 boolean_t dnode_add_ref(dnode_t *dn, void *ref);
 void dnode_rele(dnode_t *dn, void *ref);

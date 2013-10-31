@@ -258,12 +258,12 @@ dnode_verify(dnode_t *dn)
 		ASSERT(DMU_OT_IS_VALID(dn->dn_type));
 		ASSERT3U(dn->dn_nblkptr, >=, 1);
 		ASSERT3U(dn->dn_nblkptr, <=, DN_MAX_NBLKPTR);
-		ASSERT3U(dn->dn_bonuslen, <=, DN_MAX_BONUSLEN);
+		ASSERT3U(dn->dn_bonuslen, <=, DN_BONUS_SIZE(dn->dn_count));
 		ASSERT3U(dn->dn_datablksz, ==,
 		    dn->dn_datablkszsec << SPA_MINBLOCKSHIFT);
 		ASSERT3U(ISP2(dn->dn_datablksz), ==, dn->dn_datablkshift != 0);
 		ASSERT3U((dn->dn_nblkptr - 1) * sizeof (blkptr_t) +
-		    dn->dn_bonuslen, <=, DN_MAX_BONUSLEN);
+		    dn->dn_bonuslen, <=, DN_BONUS_SIZE(dn->dn_count));
 		for (i = 0; i < TXG_SIZE; i++) {
 			ASSERT3U(dn->dn_next_nlevels[i], <=, dn->dn_nlevels);
 		}
@@ -294,6 +294,7 @@ dnode_byteswap(dnode_phys_t *dnp)
 
 	dnp->dn_datablkszsec = BSWAP_16(dnp->dn_datablkszsec);
 	dnp->dn_bonuslen = BSWAP_16(dnp->dn_bonuslen);
+	dnp->dn_nextra = BSWAP_8(dnp->dn_nextra);
 	dnp->dn_maxblkid = BSWAP_64(dnp->dn_maxblkid);
 	dnp->dn_used = BSWAP_64(dnp->dn_used);
 
@@ -320,7 +321,7 @@ dnode_byteswap(dnode_phys_t *dnp)
 		 * dnode buffer).
 		 */
 		int off = (dnp->dn_nblkptr-1) * sizeof (blkptr_t);
-		size_t len = DN_MAX_BONUSLEN - off;
+		size_t len = DN_BONUS_SIZE(dnp->dn_nextra + 1) - off;
 		dmu_object_byteswap_t byteswap;
 		ASSERT(DMU_OT_IS_VALID(dnp->dn_bonustype));
 		byteswap = DMU_OT_BYTESWAP(dnp->dn_bonustype);
@@ -329,23 +330,24 @@ dnode_byteswap(dnode_phys_t *dnp)
 
 	/* Swap SPILL block if we have one */
 	if (dnp->dn_flags & DNODE_FLAG_SPILL_BLKPTR)
-		byteswap_uint64_array(&dnp->dn_spill, sizeof (blkptr_t));
-
+		byteswap_uint64_array(DN_SPILL_BLKPTR(dnp), sizeof (blkptr_t));
 }
 
 void
 dnode_buf_byteswap(void *vbuf, size_t size)
 {
-	dnode_phys_t *buf = vbuf;
-	int i;
+	int i = 0;
 
 	ASSERT3U(sizeof (dnode_phys_t), ==, (1<<DNODE_SHIFT));
 	ASSERT((size & (sizeof (dnode_phys_t)-1)) == 0);
 
-	size >>= DNODE_SHIFT;
-	for (i = 0; i < size; i++) {
-		dnode_byteswap(buf);
-		buf++;
+	while (i < size) {
+		dnode_phys_t *dnp = vbuf + i;
+		dnode_byteswap(dnp);
+
+		i += DNODE_MIN_SIZE;
+		if (dnp->dn_type != DMU_OT_NONE)
+			i += dnp->dn_nextra * DNODE_MIN_SIZE;
 	}
 }
 
@@ -356,7 +358,7 @@ dnode_setbonuslen(dnode_t *dn, int newsize, dmu_tx_t *tx)
 
 	dnode_setdirty(dn, tx);
 	rw_enter(&dn->dn_struct_rwlock, RW_WRITER);
-	ASSERT3U(newsize, <=, DN_MAX_BONUSLEN -
+	ASSERT3U(newsize, <=, DN_BONUS_SIZE(dn->dn_count) -
 	    (dn->dn_nblkptr-1) * sizeof (blkptr_t));
 	dn->dn_bonuslen = newsize;
 	if (newsize == 0)
@@ -434,6 +436,7 @@ dnode_create(objset_t *os, dnode_phys_t *dnp, dmu_buf_impl_t *db,
 	dn->dn_compress = dnp->dn_compress;
 	dn->dn_bonustype = dnp->dn_bonustype;
 	dn->dn_bonuslen = dnp->dn_bonuslen;
+	dn->dn_count = dnp->dn_nextra + 1;
 	dn->dn_maxblkid = dnp->dn_maxblkid;
 	dn->dn_have_spill = ((dnp->dn_flags & DNODE_FLAG_SPILL_BLKPTR) != 0);
 	dn->dn_id_flags = 0;
@@ -533,10 +536,13 @@ dnode_destroy(dnode_t *dn)
 }
 
 void
-dnode_allocate(dnode_t *dn, dmu_object_type_t ot, int blocksize, int ibs,
-    dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
+dnode_allocate(dnode_t *dn, dmu_object_type_t ot, int blocksize,
+    int ibs, dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
 {
 	int i;
+	int count = dmu_tx_dn_count(tx);
+
+	ASSERT3U(count, >, 0);
 
 	ASSERT3U(blocksize, <=,
 	    spa_maxblocksize(dmu_objset_spa(dn->dn_objset)));
@@ -562,7 +568,7 @@ dnode_allocate(dnode_t *dn, dmu_object_type_t ot, int blocksize, int ibs,
 	    (bonustype == DMU_OT_SA && bonuslen == 0) ||
 	    (bonustype != DMU_OT_NONE && bonuslen != 0));
 	ASSERT(DMU_OT_IS_VALID(bonustype));
-	ASSERT3U(bonuslen, <=, DN_MAX_BONUSLEN);
+	ASSERT3U(bonuslen, <=, DN_BONUS_SIZE(count));
 	ASSERT(dn->dn_type == DMU_OT_NONE);
 	ASSERT0(dn->dn_maxblkid);
 	ASSERT0(dn->dn_allocated_txg);
@@ -588,11 +594,15 @@ dnode_allocate(dnode_t *dn, dmu_object_type_t ot, int blocksize, int ibs,
 	dnode_setdblksz(dn, blocksize);
 	dn->dn_indblkshift = ibs;
 	dn->dn_nlevels = 1;
+	dn->dn_count = count;
 	if (bonustype == DMU_OT_SA) /* Maximize bonus space for SA */
 		dn->dn_nblkptr = 1;
-	else
-		dn->dn_nblkptr = 1 +
-		    ((DN_MAX_BONUSLEN - bonuslen) >> SPA_BLKPTRSHIFT);
+	else {
+		dn->dn_nblkptr = MIN(DN_MAX_NBLKPTR,
+		    1 + ((DN_OLD_MAX_BONUSLEN - bonuslen) >>
+		    SPA_BLKPTRSHIFT));
+	}
+
 	dn->dn_bonustype = bonustype;
 	dn->dn_bonuslen = bonuslen;
 	dn->dn_checksum = ZIO_CHECKSUM_INHERIT;
@@ -654,7 +664,9 @@ dnode_reallocate(dnode_t *dn, dmu_object_type_t ot, int blocksize,
 	if (bonustype == DMU_OT_SA) /* Maximize bonus space for SA */
 		nblkptr = 1;
 	else
-		nblkptr = 1 + ((DN_MAX_BONUSLEN - bonuslen) >> SPA_BLKPTRSHIFT);
+		dn->dn_nblkptr = MIN(DN_MAX_NBLKPTR,
+		    1 + ((DN_OLD_MAX_BONUSLEN - bonuslen) >>
+		    SPA_BLKPTRSHIFT));
 	if (dn->dn_bonustype != bonustype)
 		dn->dn_next_bonustype[tx->tx_txg&TXG_MASK] = bonustype;
 	if (dn->dn_nblkptr != nblkptr)
@@ -672,6 +684,7 @@ dnode_reallocate(dnode_t *dn, dmu_object_type_t ot, int blocksize,
 	mutex_enter(&dn->dn_mtx);
 	dn->dn_bonustype = bonustype;
 	dn->dn_bonuslen = bonuslen;
+	dn->dn_count = DN_BONUSLEN_TO_COUNT(bonuslen);
 	dn->dn_nblkptr = nblkptr;
 	dn->dn_checksum = ZIO_CHECKSUM_INHERIT;
 	dn->dn_compress = ZIO_COMPRESS_INHERIT;
@@ -680,7 +693,8 @@ dnode_reallocate(dnode_t *dn, dmu_object_type_t ot, int blocksize,
 	/* fix up the bonus db_size */
 	if (dn->dn_bonus) {
 		dn->dn_bonus->db.db_size =
-		    DN_MAX_BONUSLEN - (dn->dn_nblkptr-1) * sizeof (blkptr_t);
+		    DN_BONUS_SIZE(dn->dn_count) -
+		    (dn->dn_nblkptr-1) * sizeof (blkptr_t);
 		ASSERT(dn->dn_bonuslen <= dn->dn_bonus->db.db_size);
 	}
 
@@ -1057,14 +1071,15 @@ dnode_buf_pageout(void *dbu)
 /*
  * errors:
  * EINVAL - invalid object number.
+ * ENOSPC - hole too small to fulfill "count" request
  * EIO - i/o error.
  * succeeds even for free dnodes.
  */
 int
-dnode_hold_impl(objset_t *os, uint64_t object, int flag,
+dnode_hold_impl(objset_t *os, uint64_t object, int flag, int count,
     void *tag, dnode_t **dnp)
 {
-	int epb, idx, err;
+	int epb, idx, err, i;
 	int drop_struct_lock = FALSE;
 	int type;
 	uint64_t blk;
@@ -1072,6 +1087,9 @@ dnode_hold_impl(objset_t *os, uint64_t object, int flag,
 	dmu_buf_impl_t *db;
 	dnode_children_t *children_dnodes;
 	dnode_handle_t *dnh;
+
+	ASSERT(!(flag & DNODE_MUST_BE_ALLOCATED) || (count == 0));
+	ASSERT(!(flag & DNODE_MUST_BE_FREE) || (count > 0));
 
 	/*
 	 * If you are holding the spa config lock as writer, you shouldn't
@@ -1130,10 +1148,26 @@ dnode_hold_impl(objset_t *os, uint64_t object, int flag,
 
 	idx = object & (epb-1);
 
+	if (flag & DNODE_MUST_BE_FREE) {
+		if (idx + count > epb) {
+			dbuf_rele(db, FTAG);
+			return (ENOSPC);
+		}
+
+		for (i = 0; i < count; i++) {
+			dnode_phys_t *phys =
+			    (dnode_phys_t *)db->db.db_data + idx + i;
+
+			if (phys->dn_type != DMU_OT_NONE) {
+				dbuf_rele(db, FTAG);
+				return (ENOSPC);
+			}
+		}
+	}
+
 	ASSERT(DB_DNODE(db)->dn_type == DMU_OT_DNODE);
 	children_dnodes = dmu_buf_get_user(&db->db);
 	if (children_dnodes == NULL) {
-		int i;
 		dnode_children_t *winner;
 		children_dnodes = kmem_zalloc(sizeof (dnode_children_t) +
 		    epb * sizeof (dnode_handle_t), KM_SLEEP);
@@ -1200,7 +1234,8 @@ dnode_hold_impl(objset_t *os, uint64_t object, int flag,
 int
 dnode_hold(objset_t *os, uint64_t object, void *tag, dnode_t **dnp)
 {
-	return (dnode_hold_impl(os, object, DNODE_MUST_BE_ALLOCATED, tag, dnp));
+	return (dnode_hold_impl(os, object, DNODE_MUST_BE_ALLOCATED, 0,
+	    tag, dnp));
 }
 
 /*
@@ -1858,17 +1893,23 @@ dnode_next_offset_level(dnode_t *dn, int flags, uint64_t *offset,
 		 */
 		error = SET_ERROR(ESRCH);
 	} else if (lvl == 0) {
-		dnode_phys_t *dnp = data;
-		span = DNODE_SHIFT;
 		ASSERT(dn->dn_type == DMU_OT_DNODE);
 
-		for (i = (*offset >> span) & (blkfill - 1);
-		    i >= 0 && i < blkfill; i += inc) {
-			if ((dnp[i].dn_type == DMU_OT_NONE) == hole)
+		i = ((*offset >> DNODE_SHIFT) & (blkfill - 1)) << DNODE_SHIFT;
+		while (i >= 0 && i < (blkfill * (1ULL << DNODE_SHIFT))) {
+			dnode_phys_t *dnp = data + i;
+			if ((dnp->dn_type == DMU_OT_NONE) == hole)
 				break;
-			*offset += (1ULL << span) * inc;
+
+			i += DNODE_MIN_SIZE * inc;
+			*offset += DNODE_MIN_SIZE * inc;
+			if (dnp->dn_type != DMU_OT_NONE) {
+				i += (dnp->dn_nextra * DNODE_MIN_SIZE) * inc;
+				*offset +=
+				    (dnp->dn_nextra * DNODE_MIN_SIZE) * inc;
+			}
 		}
-		if (i < 0 || i == blkfill)
+		if (i < 0 || i == (blkfill * (1ULL << DNODE_SHIFT)))
 			error = SET_ERROR(ESRCH);
 	} else {
 		blkptr_t *bp = data;
