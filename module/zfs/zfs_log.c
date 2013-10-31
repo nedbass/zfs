@@ -45,6 +45,7 @@
 #include <sys/spa.h>
 #include <sys/zfs_fuid.h>
 #include <sys/ddi.h>
+#include <sys/dmu_tx.h>
 #include <sys/dsl_dataset.h>
 
 /*
