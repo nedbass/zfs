@@ -62,6 +62,7 @@
 
 #include <sys/dmu.h>
 #include <sys/dmu_objset.h>
+#include <sys/dmu_tx.h>
 #include <sys/refcount.h>
 #include <sys/stat.h>
 #include <sys/zap.h>
@@ -579,8 +580,9 @@ zfs_mknode(znode_t *dzp, vattr_t *vap, dmu_tx_t *tx, cred_t *cr,
 	}
 
 	obj_type = zsb->z_use_sa ? DMU_OT_SA : DMU_OT_ZNODE;
+
 	bonuslen = (obj_type == DMU_OT_SA) ?
-	    DN_MAX_BONUSLEN : ZFS_OLD_ZNODE_PHYS_SIZE;
+	    DN_BONUS_SIZE(dmu_tx_dn_count(tx)) : ZFS_OLD_ZNODE_PHYS_SIZE;
 
 	/*
 	 * Create a new DMU object.
@@ -1636,6 +1638,14 @@ zfs_create_fs(objset_t *os, cred_t *cr, nvlist_t *zplprops, dmu_tx_t *tx)
 	error = zap_create_claim(os, moid, DMU_OT_MASTER_NODE,
 	    DMU_OT_NONE, 0, tx);
 	ASSERT(error == 0);
+
+	/*
+	 * Give dmu_object_alloc() a hint about where to start
+	 * allocating new objects. Otherwise, since the metadnode's
+	 * dnode_phys_t structure isn't initialized yet, dmu_object_next()
+	 * would fail and we'd have to skip to the next dnode block.
+	 */
+	os->os_obj_next = moid + 1;
 
 	/*
 	 * Set starting attributes.

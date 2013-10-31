@@ -242,4 +242,15 @@ zpool_feature_init(void)
 	    "Support for blocks larger than 128KB.", B_FALSE, B_FALSE, B_FALSE,
 	    large_blocks_deps);
 	}
+
+	{
+	static const spa_feature_t large_dnode_deps[] = {
+		SPA_FEATURE_EXTENSIBLE_DATASET,
+		SPA_FEATURE_NONE
+	};
+	zfeature_register(SPA_FEATURE_LARGE_DNODE,
+	    "org.zfsonlinux:large_dnode", "large_dnode",
+	    "Variable on-disk size of dnodes.",
+	    B_TRUE, B_FALSE, B_FALSE, large_dnode_deps);
+	}
 }
