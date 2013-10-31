@@ -485,7 +485,7 @@ backup_cb(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 	} else if (type == DMU_OT_DNODE) {
 		dnode_phys_t *blk;
 		int i;
-		int blksz = BP_GET_LSIZE(bp);
+		int epb = BP_GET_LSIZE(bp) >> DNODE_SHIFT;
 		arc_flags_t aflags = ARC_FLAG_WAIT;
 		arc_buf_t *abuf;
 
@@ -495,7 +495,7 @@ backup_cb(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 			return (SET_ERROR(EIO));
 
 		blk = abuf->b_data;
-		for (i = 0; i < blksz >> DNODE_SHIFT; i++) {
+		for (i = 0; i < epb; i += blk[i].dn_nextra + 1) {
 			uint64_t dnobj = (zb->zb_blkid <<
 			    (DNODE_BLOCK_SHIFT - DNODE_SHIFT)) + i;
 			err = dump_dnode(dsp, dnobj, blk+i);
@@ -1480,7 +1480,8 @@ deduce_nblkptr(dmu_object_type_t bonus_type, uint64_t bonus_size)
 		return (1);
 	} else {
 		return (1 +
-		    ((DN_MAX_BONUSLEN - bonus_size) >> SPA_BLKPTRSHIFT));
+		    ((DN_OLD_MAX_BONUSLEN -
+		    MIN(DN_OLD_MAX_BONUSLEN, bonus_size)) >> SPA_BLKPTRSHIFT));
 	}
 }
 
@@ -1491,6 +1492,7 @@ restore_object(struct restorearg *ra, objset_t *os, struct drr_object *drro)
 	dmu_tx_t *tx;
 	void *data = NULL;
 	uint64_t object;
+	int dn_slots;
 	int err;
 
 	if (drro->drr_type == DMU_OT_NONE ||
@@ -1501,7 +1503,9 @@ restore_object(struct restorearg *ra, objset_t *os, struct drr_object *drro)
 	    P2PHASE(drro->drr_blksz, SPA_MINBLOCKSIZE) ||
 	    drro->drr_blksz < SPA_MINBLOCKSIZE ||
 	    drro->drr_blksz > spa_maxblocksize(dmu_objset_spa(os)) ||
-	    drro->drr_bonuslen > DN_MAX_BONUSLEN) {
+	    drro->drr_bonuslen > DN_MAX_BONUSLEN ||
+	    (!spa_feature_is_enabled(os->os_spa, SPA_FEATURE_LARGE_DNODE) &&
+	    drro->drr_bonuslen > DN_OLD_MAX_BONUSLEN)) {
 		return (SET_ERROR(EINVAL));
 	}
 
@@ -1537,7 +1541,8 @@ restore_object(struct restorearg *ra, objset_t *os, struct drr_object *drro)
 		}
 	}
 
-	tx = dmu_tx_create(os);
+	dn_slots = DN_BONUSLEN_TO_SLOTS(drro->drr_bonuslen);
+	tx = dmu_tx_create_dn_num_slots(os, dn_slots);
 	dmu_tx_hold_bonus(tx, object);
 	err = dmu_tx_assign(tx, TXG_WAIT);
 	if (err != 0) {
@@ -1598,18 +1603,25 @@ restore_freeobjects(struct restorearg *ra, objset_t *os,
 	if (drrfo->drr_firstobj + drrfo->drr_numobjs < drrfo->drr_firstobj)
 		return (SET_ERROR(EINVAL));
 
-	for (obj = drrfo->drr_firstobj;
+	for (obj = drrfo->drr_firstobj == 0 ? 1 : drrfo->drr_firstobj;
 	    obj < drrfo->drr_firstobj + drrfo->drr_numobjs;
 	    (void) dmu_object_next(os, &obj, FALSE, 0)) {
+		dmu_object_info_t doi;
 		int err;
 
-		if (dmu_object_info(os, obj, NULL) != 0)
+		err = dmu_object_info(os, obj, &doi);
+		if (err == ENOENT) {
+			obj++;
 			continue;
+		} else if (err != 0) {
+			return (SET_ERROR(err));
+		}
 
 		err = dmu_free_long_object(os, obj);
-		if (err != 0)
-			return (err);
+		if (err != 0);
+			return (SET_ERROR(err));
 	}
+
 	return (0);
 }
 

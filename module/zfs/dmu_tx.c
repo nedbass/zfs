@@ -83,7 +83,16 @@ dmu_tx_create(objset_t *os)
 {
 	dmu_tx_t *tx = dmu_tx_create_dd(os->os_dsl_dataset->ds_dir);
 	tx->tx_objset = os;
+	tx->tx_dn_slots = os->os_dn_slots;
 	tx->tx_lastsnap_txg = dsl_dataset_prev_snap_txg(os->os_dsl_dataset);
+	return (tx);
+}
+
+dmu_tx_t *
+dmu_tx_create_dn_num_slots(objset_t *os, int count)
+{
+	dmu_tx_t *tx = dmu_tx_create(os);
+	tx->tx_dn_slots = count;
 	return (tx);
 }
 
@@ -96,6 +105,7 @@ dmu_tx_create_assigned(struct dsl_pool *dp, uint64_t txg)
 	tx->tx_pool = dp;
 	tx->tx_txg = txg;
 	tx->tx_anyobj = TRUE;
+	tx->tx_dn_slots = DNODE_MIN_SLOTS;
 
 	return (tx);
 }
@@ -110,6 +120,12 @@ int
 dmu_tx_private_ok(dmu_tx_t *tx)
 {
 	return (tx->tx_anyobj);
+}
+
+int
+dmu_tx_dn_slots(dmu_tx_t *tx)
+{
+	return (tx->tx_dn_slots);
 }
 
 static dmu_tx_hold_t *
@@ -1558,7 +1574,7 @@ dmu_tx_hold_spill(dmu_tx_t *tx, uint64_t object)
 	} else {
 		blkptr_t *bp;
 
-		bp = &dn->dn_phys->dn_spill;
+		bp = DN_SPILL_BLKPTR(dn->dn_phys);
 		if (dsl_dataset_block_freeable(dn->dn_objset->os_dsl_dataset,
 		    bp, bp->blk_birth))
 			txh->txh_space_tooverwrite += SPA_OLD_MAXBLOCKSIZE;
@@ -1590,7 +1606,8 @@ dmu_tx_hold_sa_create(dmu_tx_t *tx, int attrsize)
 
 	dmu_tx_sa_registration_hold(sa, tx);
 
-	if (attrsize <= DN_MAX_BONUSLEN && !sa->sa_force_spill)
+	if (attrsize <= DN_BONUS_SIZE(tx->tx_dn_slots) &&
+	    !sa->sa_force_spill)
 		return;
 
 	(void) dmu_tx_hold_object_impl(tx, tx->tx_objset, DMU_NEW_OBJECT,
@@ -1675,6 +1692,8 @@ dmu_tx_fini(void)
 
 #if defined(_KERNEL) && defined(HAVE_SPL)
 EXPORT_SYMBOL(dmu_tx_create);
+EXPORT_SYMBOL(dmu_tx_create_dn_num_slots);
+EXPORT_SYMBOL(dmu_tx_dn_slots);
 EXPORT_SYMBOL(dmu_tx_hold_write);
 EXPORT_SYMBOL(dmu_tx_hold_free);
 EXPORT_SYMBOL(dmu_tx_hold_zap);

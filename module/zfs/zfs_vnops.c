@@ -1374,7 +1374,10 @@ top:
 			goto out;
 		}
 
-		tx = dmu_tx_create(os);
+		if (zsb->z_replay)
+			tx = dmu_tx_create_dn_num_slots(os, DNODE_MIN_SLOTS);
+		else
+			tx = dmu_tx_create(os);
 
 		dmu_tx_hold_sa_create(tx, acl_ids.z_aclp->z_acl_bytes +
 		    ZFS_SA_BASE_ATTR_SIZE);

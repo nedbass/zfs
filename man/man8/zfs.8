@@ -922,6 +922,25 @@ Controls whether device nodes can be opened on this file system. The default val
 .ne 2
 .mk
 .na
+\fB\fBdnodesize\fR=\fIsize\fR\fR
+.ad
+.sp .6
+.RS 4n
+Specifies a suggested size for dnodes in the file system. Setting this property to a value larger than 512 required the \fBlarge_dnode\fB pool feature to be enabled.
+.sp
+Increasing the default dnode size may have a performance benefit on filesystems where a smaller dnode size would result in heavy use of spill blocks.
+.sp
+The size specified must be a multiple of 512 greater than or equal to 512 and less than or equal to 16 Kbytes. The default value is 512.
+.sp
+Changing the file system's \fBdnodesize\fR affects only files created afterward; existing files are unaffected.
+.sp
+This property can also be referred to by its shortened column name, \fBdnsize\fR.
+.RE
+
+.sp
+.ne 2
+.mk
+.na
 \fB\fBexec\fR=\fBon\fR | \fBoff\fR\fR
 .ad
 .sp .6

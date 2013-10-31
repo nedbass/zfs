@@ -1877,15 +1877,15 @@ dump_object(objset_t *os, uint64_t object, int verbosity, int *print_header)
 	dnode_t *dn;
 	void *bonus = NULL;
 	size_t bsize = 0;
-	char iblk[32], dblk[32], lsize[32], asize[32], fill[32];
+	char iblk[32], dblk[32], lsize[32], asize[32], fill[32], dnsize[32];
 	char bonus_size[32];
 	char aux[50];
 	int error;
 
 	if (*print_header) {
-		(void) printf("\n%10s  %3s  %5s  %5s  %5s  %5s  %6s  %s\n",
-		    "Object", "lvl", "iblk", "dblk", "dsize", "lsize",
-		    "%full", "type");
+		(void) printf("\n%10s  %3s  %5s  %5s  %5s  %6s  %5s  %6s  %s\n",
+		    "Object", "lvl", "iblk", "dblk", "dsize", "dnsize",
+		    "lsize", "%full", "type");
 		*print_header = 0;
 	}
 
@@ -1907,6 +1907,7 @@ dump_object(objset_t *os, uint64_t object, int verbosity, int *print_header)
 	zdb_nicenum(doi.doi_max_offset, lsize);
 	zdb_nicenum(doi.doi_physical_blocks_512 << 9, asize);
 	zdb_nicenum(doi.doi_bonus_size, bonus_size);
+	zdb_nicenum(doi.doi_num_slots * DNODE_MIN_SLOTS, dnsize);
 	(void) sprintf(fill, "%6.2f", 100.0 * doi.doi_fill_count *
 	    doi.doi_data_block_size / (object == 0 ? DNODES_PER_BLOCK : 1) /
 	    doi.doi_max_offset);
@@ -1923,13 +1924,13 @@ dump_object(objset_t *os, uint64_t object, int verbosity, int *print_header)
 		    ZDB_COMPRESS_NAME(doi.doi_compress));
 	}
 
-	(void) printf("%10lld  %3u  %5s  %5s  %5s  %5s  %6s  %s%s\n",
+	(void) printf("%10lld  %3u  %5s  %5s  %5s  %6s  %5s  %6s  %s%s\n",
 	    (u_longlong_t)object, doi.doi_indirection, iblk, dblk,
-	    asize, lsize, fill, ZDB_OT_NAME(doi.doi_type), aux);
+	    asize, dnsize, lsize, fill, ZDB_OT_NAME(doi.doi_type), aux);
 
 	if (doi.doi_bonus_type != DMU_OT_NONE && verbosity > 3) {
-		(void) printf("%10s  %3s  %5s  %5s  %5s  %5s  %6s  %s\n",
-		    "", "", "", "", "", bonus_size, "bonus",
+		(void) printf("%10s  %3s  %5s  %5s  %5s  %5s  %5s  %6s  %s\n",
+		    "", "", "", "", "", "", bonus_size, "bonus",
 		    ZDB_OT_NAME(doi.doi_bonus_type));
 	}
 
@@ -2275,6 +2276,7 @@ dump_label(const char *dev)
 }
 
 static uint64_t num_large_blocks;
+static uint64_t num_large_dnode;
 
 /*ARGSUSED*/
 static int
@@ -2290,6 +2292,8 @@ dump_one_dir(const char *dsname, void *arg)
 	}
 	if (dmu_objset_ds(os)->ds_large_blocks)
 		num_large_blocks++;
+	if (dmu_objset_ds(os)->ds_large_dnode)
+		num_large_dnode++;
 	dump_dir(os);
 	dmu_objset_disown(os, FTAG);
 	fuid_table_destroy();
@@ -3131,6 +3135,19 @@ dump_zpool(spa_t *spa)
 				    "refcount is correct (%llu)\n",
 				    (longlong_t)refcount);
 			}
+		}
+
+		(void) feature_get_refcount(spa,
+		    &spa_feature_table[SPA_FEATURE_LARGE_DNODE], &refcount);
+		if (num_large_dnode != refcount) {
+			(void) printf("large_dnode feature refcount mismatch: "
+			    "expected %lld != actual %lld\n",
+			    (longlong_t)num_large_dnode,
+			    (longlong_t)refcount);
+			rc = 2;
+		} else {
+			(void) printf("Verified large_dnode feature refcount "
+			    "is correct (%llu)\n", (longlong_t)refcount);
 		}
 	}
 	if (rc == 0 && (dump_opt['b'] || dump_opt['c']))
