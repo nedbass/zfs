@@ -593,10 +593,10 @@ dbuf_read_impl(dmu_buf_impl_t *db, zio_t *zio, uint32_t *flags)
 		int bonuslen = MIN(dn->dn_bonuslen, dn->dn_phys->dn_bonuslen);
 
 		ASSERT3U(bonuslen, <=, db->db.db_size);
-		db->db.db_data = zio_buf_alloc(DN_MAX_BONUSLEN);
-		arc_space_consume(DN_MAX_BONUSLEN, ARC_SPACE_OTHER);
-		if (bonuslen < DN_MAX_BONUSLEN)
-			bzero(db->db.db_data, DN_MAX_BONUSLEN);
+		db->db.db_data = zio_buf_alloc(DN_BONUS_SIZE(dn->dn_count));
+		arc_space_consume(DN_BONUS_SIZE(dn->dn_count), ARC_SPACE_OTHER);
+		if (bonuslen < DN_BONUS_SIZE(dn->dn_count))
+			bzero(db->db.db_data, DN_BONUS_SIZE(dn->dn_count));
 		if (bonuslen)
 			bcopy(DN_BONUS(dn->dn_phys), db->db.db_data, bonuslen);
 		DB_DNODE_EXIT(db);
@@ -807,9 +807,11 @@ dbuf_fix_old_data(dmu_buf_impl_t *db, uint64_t txg)
 	ASSERT(dr->dr_txg >= txg - 2);
 	if (db->db_blkid == DMU_BONUS_BLKID) {
 		/* Note that the data bufs here are zio_bufs */
-		dr->dt.dl.dr_data = zio_buf_alloc(DN_MAX_BONUSLEN);
-		arc_space_consume(DN_MAX_BONUSLEN, ARC_SPACE_OTHER);
-		bcopy(db->db.db_data, dr->dt.dl.dr_data, DN_MAX_BONUSLEN);
+		dnode_t *dn = DB_DNODE(db);
+		dr->dt.dl.dr_data = zio_buf_alloc(DN_BONUS_SIZE(dn->dn_count));
+		arc_space_consume(DN_BONUS_SIZE(dn->dn_count), ARC_SPACE_OTHER);
+		bcopy(db->db.db_data, dr->dt.dl.dr_data,
+		    DN_BONUS_SIZE(dn->dn_count));
 	} else if (refcount_count(&db->db_holds) > db->db_dirtycnt) {
 		int size = db->db.db_size;
 		arc_buf_contents_t type = DBUF_GET_BUFC_TYPE(db);
@@ -1629,8 +1631,9 @@ dbuf_clear(dmu_buf_impl_t *db)
 	if (db->db_state == DB_CACHED) {
 		ASSERT(db->db.db_data != NULL);
 		if (db->db_blkid == DMU_BONUS_BLKID) {
-			zio_buf_free(db->db.db_data, DN_MAX_BONUSLEN);
-			arc_space_return(DN_MAX_BONUSLEN, ARC_SPACE_OTHER);
+			uint8_t count = DB_DNODE(db)->dn_count;
+			zio_buf_free(db->db.db_data, DN_BONUS_SIZE(count));
+			arc_space_return(DN_BONUS_SIZE(count), ARC_SPACE_OTHER);
 		}
 		db->db.db_data = NULL;
 		db->db_state = DB_UNCACHED;
@@ -1784,7 +1787,7 @@ dbuf_create(dnode_t *dn, uint8_t level, uint64_t blkid,
 
 	if (blkid == DMU_BONUS_BLKID) {
 		ASSERT3P(parent, ==, dn->dn_dbuf);
-		db->db.db_size = DN_MAX_BONUSLEN -
+		db->db.db_size = DN_BONUS_SIZE(dn->dn_count) -
 		    (dn->dn_nblkptr-1) * sizeof (blkptr_t);
 		ASSERT3U(db->db.db_size, >=, dn->dn_bonuslen);
 		db->db.db_offset = DMU_BONUS_BLKID;
@@ -2502,13 +2505,15 @@ dbuf_sync_leaf(dbuf_dirty_record_t *dr, dmu_tx_t *tx)
 
 		ASSERT(*datap != NULL);
 		ASSERT0(db->db_level);
-		ASSERT3U(dn->dn_phys->dn_bonuslen, <=, DN_MAX_BONUSLEN);
+		ASSERT3U(dn->dn_phys->dn_bonuslen, <=,
+		    DN_BONUS_SIZE(dn->dn_phys->dn_nextra + 1));
 		bcopy(*datap, DN_BONUS(dn->dn_phys), dn->dn_phys->dn_bonuslen);
 		DB_DNODE_EXIT(db);
 
 		if (*datap != db->db.db_data) {
-			zio_buf_free(*datap, DN_MAX_BONUSLEN);
-			arc_space_return(DN_MAX_BONUSLEN, ARC_SPACE_OTHER);
+			uint8_t count = DB_DNODE(db)->dn_count;
+			zio_buf_free(*datap, DN_BONUS_SIZE(count));
+			arc_space_return(DN_BONUS_SIZE(count), ARC_SPACE_OTHER);
 		}
 		db->db_data_pending = NULL;
 		drp = &db->db_last_dirty;
@@ -2666,11 +2671,15 @@ dbuf_write_ready(zio_t *zio, arc_buf_t *buf, void *vdb)
 		mutex_exit(&dn->dn_mtx);
 
 		if (dn->dn_type == DMU_OT_DNODE) {
-			dnode_phys_t *dnp = db->db.db_data;
-			for (i = db->db.db_size >> DNODE_SHIFT; i > 0;
-			    i--, dnp++) {
-				if (dnp->dn_type != DMU_OT_NONE)
+			i = 0;
+			while (i < db->db.db_size) {
+				dnode_phys_t *dnp = db->db.db_data + i;
+
+				i += DNODE_MIN_SIZE;
+				if (dnp->dn_type != DMU_OT_NONE) {
 					fill++;
+					i += dnp->dn_nextra * DNODE_MIN_SIZE;
+				}
 			}
 		} else {
 			if (BP_IS_HOLE(bp)) {
