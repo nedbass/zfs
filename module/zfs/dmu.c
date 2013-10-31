@@ -178,7 +178,7 @@ dmu_buf_hold(objset_t *os, uint64_t object, uint64_t offset,
 int
 dmu_bonus_max(void)
 {
-	return (DN_MAX_BONUSLEN);
+	return (DN_OLD_MAX_BONUSLEN);
 }
 
 int
@@ -1926,6 +1926,7 @@ __dmu_object_info_from_dnode(dnode_t *dn, dmu_object_info_t *doi)
 	doi->doi_type = dn->dn_type;
 	doi->doi_bonus_type = dn->dn_bonustype;
 	doi->doi_bonus_size = dn->dn_bonuslen;
+	doi->doi_count = dn->dn_count;
 	doi->doi_indirection = dn->dn_nlevels;
 	doi->doi_checksum = dn->dn_checksum;
 	doi->doi_compress = dn->dn_compress;
@@ -2002,6 +2003,19 @@ dmu_object_size_from_db(dmu_buf_t *db_fake, uint32_t *blksize,
 	    SPA_MINBLOCKSHIFT) + 1;
 	DB_DNODE_EXIT(db);
 }
+
+void
+dmu_object_count_from_db(dmu_buf_t *db_fake, int *count)
+{
+	dmu_buf_impl_t *db = (dmu_buf_impl_t *)db_fake;
+	dnode_t *dn;
+
+	DB_DNODE_ENTER(db);
+	dn = DB_DNODE(db);
+	*count = dn->dn_count;
+	DB_DNODE_EXIT(db);
+}
+
 
 void
 byteswap_uint64_array(void *vbuf, size_t size)
@@ -2093,6 +2107,7 @@ EXPORT_SYMBOL(dmu_object_info);
 EXPORT_SYMBOL(dmu_object_info_from_dnode);
 EXPORT_SYMBOL(dmu_object_info_from_db);
 EXPORT_SYMBOL(dmu_object_size_from_db);
+EXPORT_SYMBOL(dmu_object_count_from_db);
 EXPORT_SYMBOL(dmu_object_set_blocksize);
 EXPORT_SYMBOL(dmu_object_set_checksum);
 EXPORT_SYMBOL(dmu_object_set_compress);
