@@ -1995,6 +1995,15 @@ spa_maxblocksize(spa_t *spa)
 		return (SPA_OLD_MAXBLOCKSIZE);
 }
 
+int
+spa_maxdnodeslots(spa_t *spa)
+{
+	if (spa_feature_is_enabled(spa, SPA_FEATURE_LARGE_DNODE))
+		return (DNODE_MAX_SLOTS);
+	else
+		return (DNODE_MIN_SLOTS);
+}
+
 #if defined(_KERNEL) && defined(HAVE_SPL)
 /* Namespace manipulation */
 EXPORT_SYMBOL(spa_lookup);

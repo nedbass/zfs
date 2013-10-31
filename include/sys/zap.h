@@ -132,11 +132,19 @@ typedef enum zap_flags {
  */
 uint64_t zap_create(objset_t *ds, dmu_object_type_t ot,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx);
+uint64_t zap_create_slots(objset_t *ds, dmu_object_type_t ot,
+    dmu_object_type_t bonustype, int bonuslen, uint8_t slots, dmu_tx_t *tx);
 uint64_t zap_create_norm(objset_t *ds, int normflags, dmu_object_type_t ot,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx);
+uint64_t zap_create_norm_slots(objset_t *ds, int normflags,
+    dmu_object_type_t ot, dmu_object_type_t bonustype, int bonuslen,
+    uint8_t slots, dmu_tx_t *tx);
 uint64_t zap_create_flags(objset_t *os, int normflags, zap_flags_t flags,
     dmu_object_type_t ot, int leaf_blockshift, int indirect_blockshift,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx);
+uint64_t zap_create_flags_slots(objset_t *os, int normflags, zap_flags_t flags,
+    dmu_object_type_t ot, int leaf_blockshift, int indirect_blockshift,
+    dmu_object_type_t bonustype, int bonuslen, uint8_t slots, dmu_tx_t *tx);
 uint64_t zap_create_link(objset_t *os, dmu_object_type_t ot,
     uint64_t parent_obj, const char *name, dmu_tx_t *tx);
 
@@ -152,9 +160,14 @@ void mzap_create_impl(objset_t *os, uint64_t obj, int normflags,
  */
 int zap_create_claim(objset_t *ds, uint64_t obj, dmu_object_type_t ot,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx);
+int zap_create_claim_slots(objset_t *ds, uint64_t obj, dmu_object_type_t ot,
+    dmu_object_type_t bonustype, int bonuslen, uint8_t dn_slots, dmu_tx_t *tx);
 int zap_create_claim_norm(objset_t *ds, uint64_t obj,
     int normflags, dmu_object_type_t ot,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx);
+int zap_create_claim_norm_slots(objset_t *ds, uint64_t obj,
+    int normflags, dmu_object_type_t ot,
+    dmu_object_type_t bonustype, int bonuslen, uint8_t dn_slots, dmu_tx_t *tx);
 
 /*
  * The zapobj passed in must be a valid ZAP object for all of the

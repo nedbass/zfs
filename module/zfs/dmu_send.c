@@ -401,6 +401,7 @@ dump_dnode(dmu_sendarg_t *dsp, uint64_t object, dnode_phys_t *dnp)
 	drro->drr_bonustype = dnp->dn_bonustype;
 	drro->drr_blksz = dnp->dn_datablkszsec << SPA_MINBLOCKSHIFT;
 	drro->drr_bonuslen = dnp->dn_bonuslen;
+	drro->drr_dn_slots = dnp->dn_extra_slots + 1;
 	drro->drr_checksumtype = dnp->dn_checksum;
 	drro->drr_compress = dnp->dn_compress;
 	drro->drr_toguid = dsp->dsa_toguid;
@@ -489,7 +490,7 @@ backup_cb(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 	} else if (type == DMU_OT_DNODE) {
 		dnode_phys_t *blk;
 		int i;
-		int blksz = BP_GET_LSIZE(bp);
+		int epb = BP_GET_LSIZE(bp) >> DNODE_SHIFT;
 		arc_flags_t aflags = ARC_FLAG_WAIT;
 		arc_buf_t *abuf;
 
@@ -499,7 +500,7 @@ backup_cb(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 			return (SET_ERROR(EIO));
 
 		blk = abuf->b_data;
-		for (i = 0; i < blksz >> DNODE_SHIFT; i++) {
+		for (i = 0; i < epb; i += blk[i].dn_extra_slots + 1) {
 			uint64_t dnobj = (zb->zb_blkid <<
 			    (DNODE_BLOCK_SHIFT - DNODE_SHIFT)) + i;
 			err = dump_dnode(dsp, dnobj, blk+i);
@@ -617,6 +618,8 @@ dmu_send_impl(void *tag, dsl_pool_t *dp, dsl_dataset_t *ds,
 
 	if (large_block_ok && ds->ds_feature_inuse[SPA_FEATURE_LARGE_BLOCKS])
 		featureflags |= DMU_BACKUP_FEATURE_LARGE_BLOCKS;
+	if (ds->ds_feature_inuse[SPA_FEATURE_LARGE_DNODE])
+		featureflags |= DMU_BACKUP_FEATURE_LARGE_DNODE;
 	if (embedok &&
 	    spa_feature_is_active(dp->dp_spa, SPA_FEATURE_EMBEDDED_DATA)) {
 		featureflags |= DMU_BACKUP_FEATURE_EMBED_DATA;
@@ -1105,6 +1108,15 @@ dmu_recv_begin_check(void *arg, dmu_tx_t *tx)
 	    !spa_feature_is_enabled(dp->dp_spa, SPA_FEATURE_LARGE_BLOCKS))
 		return (SET_ERROR(ENOTSUP));
 
+	/*
+	 * The receiving code doesn't know how to translate large dnodes
+	 * to smaller ones, so the pool must have the LARGE_DNODE
+	 * feature enabled if the stream has LARGE_DNODE.
+	 */
+	if ((featureflags & DMU_BACKUP_FEATURE_LARGE_DNODE) &&
+	    !spa_feature_is_enabled(dp->dp_spa, SPA_FEATURE_LARGE_DNODE))
+		return (SET_ERROR(ENOTSUP));
+
 	error = dsl_dataset_hold(dp, tofs, FTAG, &ds);
 	if (error == 0) {
 		/* target fs already exists; recv into temp clone */
@@ -1477,7 +1489,8 @@ deduce_nblkptr(dmu_object_type_t bonus_type, uint64_t bonus_size)
 		return (1);
 	} else {
 		return (1 +
-		    ((DN_MAX_BONUSLEN - bonus_size) >> SPA_BLKPTRSHIFT));
+		    ((DN_OLD_MAX_BONUSLEN -
+		    MIN(DN_OLD_MAX_BONUSLEN, bonus_size)) >> SPA_BLKPTRSHIFT));
 	}
 }
 
@@ -1498,7 +1511,9 @@ restore_object(struct restorearg *ra, objset_t *os, struct drr_object *drro)
 	    P2PHASE(drro->drr_blksz, SPA_MINBLOCKSIZE) ||
 	    drro->drr_blksz < SPA_MINBLOCKSIZE ||
 	    drro->drr_blksz > spa_maxblocksize(dmu_objset_spa(os)) ||
-	    drro->drr_bonuslen > DN_MAX_BONUSLEN) {
+	    drro->drr_bonuslen > DN_MAX_BONUSLEN ||
+	    (!spa_feature_is_enabled(os->os_spa, SPA_FEATURE_LARGE_DNODE) &&
+	    drro->drr_bonuslen > DN_OLD_MAX_BONUSLEN)) {
 		return (SET_ERROR(EINVAL));
 	}
 
@@ -1544,9 +1559,10 @@ restore_object(struct restorearg *ra, objset_t *os, struct drr_object *drro)
 
 	if (object == DMU_NEW_OBJECT) {
 		/* currently free, want to be allocated */
-		err = dmu_object_claim(os, drro->drr_object,
+		err = dmu_object_claim_slots(os, drro->drr_object,
 		    drro->drr_type, drro->drr_blksz,
-		    drro->drr_bonustype, drro->drr_bonuslen, tx);
+		    drro->drr_bonustype, drro->drr_bonuslen, drro->drr_dn_slots,
+		    tx);
 	} else if (drro->drr_type != doi.doi_type ||
 	    drro->drr_blksz != doi.doi_data_block_size ||
 	    drro->drr_bonustype != doi.doi_bonus_type ||
@@ -1595,18 +1611,25 @@ restore_freeobjects(struct restorearg *ra, objset_t *os,
 	if (drrfo->drr_firstobj + drrfo->drr_numobjs < drrfo->drr_firstobj)
 		return (SET_ERROR(EINVAL));
 
-	for (obj = drrfo->drr_firstobj;
+	for (obj = drrfo->drr_firstobj == 0 ? 1 : drrfo->drr_firstobj;
 	    obj < drrfo->drr_firstobj + drrfo->drr_numobjs;
 	    (void) dmu_object_next(os, &obj, FALSE, 0)) {
+		dmu_object_info_t doi;
 		int err;
 
-		if (dmu_object_info(os, obj, NULL) != 0)
+		err = dmu_object_info(os, obj, &doi);
+		if (err == ENOENT) {
+			obj++;
 			continue;
+		} else if (err != 0) {
+			return (SET_ERROR(err));
+		}
 
 		err = dmu_free_long_object(os, obj);
-		if (err != 0)
-			return (err);
+		if (err != 0);
+			return (SET_ERROR(err));
 	}
+
 	return (0);
 }
 
