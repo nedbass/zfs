@@ -91,6 +91,13 @@ struct dsl_pool;
 #define	DS_FIELD_LARGE_BLOCKS "org.open-zfs:large_blocks"
 
 /*
+ * This field is present (with value=0) if this dataset may contain large
+ * dnodes (>512B).  If it is present, then this dataset is counted in the
+ * refcount of the SPA_FEATURE_LARGE_DNODE feature.
+ */
+#define	DS_FIELD_LARGE_DNODE "org.zfsonlinux:large_dnode"
+
+/*
  * DS_FLAG_CI_DATASET is set if the dataset contains a file system whose
  * name lookups should be performed case-insensitively.
  */
@@ -147,6 +154,8 @@ typedef struct dsl_dataset {
 	uint64_t ds_bookmarks;  /* DMU_OTN_ZAP_METADATA */
 	boolean_t ds_large_blocks;
 	boolean_t ds_need_large_blocks;
+	boolean_t ds_large_dnode;
+	boolean_t ds_need_large_dnode;
 
 	/* has internal locking: */
 	dsl_deadlist_t ds_deadlist;
@@ -266,6 +275,8 @@ int dsl_dataset_space_wouldfree(dsl_dataset_t *firstsnap, dsl_dataset_t *last,
 boolean_t dsl_dataset_is_dirty(dsl_dataset_t *ds);
 int dsl_dataset_activate_large_blocks(const char *dsname);
 void dsl_dataset_activate_large_blocks_sync_impl(uint64_t dsobj, dmu_tx_t *tx);
+int dsl_dataset_activate_large_dnode(const char *dsname);
+void dsl_dataset_activate_large_dnode_sync_impl(uint64_t dsobj, dmu_tx_t *tx);
 
 int dsl_dsobj_to_dsname(char *pname, uint64_t obj, char *buf);
 

@@ -1077,6 +1077,42 @@ zfs_valid_proplist(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 			}
 			break;
 		}
+
+		case ZFS_PROP_DNODESIZE:
+		{
+			int maxds = DNODE_MIN_SIZE;
+			boolean_t badprop = B_FALSE;
+
+			if (zhp != NULL) {
+				maxds = zpool_get_prop_int(zhp->zpool_hdl,
+				    ZPOOL_PROP_MAXDNODESIZE, NULL);
+			}
+			/*
+			 * must a multiple of DNODE_MIN_SIZE within
+			 * DNODE_{MIN,MAX}_SIZE
+			 */
+			if (maxds == DNODE_MIN_SIZE && intval != maxds) {
+				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+				    "'%s' must be %u"), propname, maxds);
+				badprop = B_TRUE;
+			} else if (intval < DNODE_MIN_SIZE ||
+			    intval > maxds ||
+			    intval % DNODE_MIN_SIZE != 0) {
+				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+				    "'%s' must be a multiple of %u from %u "
+				    "to %uKB"), propname,
+				    (uint_t)DNODE_MIN_SIZE,
+				    (uint_t)DNODE_MIN_SIZE,
+				    maxds >> 10);
+				badprop = B_TRUE;
+			}
+			if (badprop) {
+				(void) zfs_error(hdl, EZFS_BADPROP, errbuf);
+				goto error;
+			}
+			break;
+		}
+
 		case ZFS_PROP_MLSLABEL:
 		{
 #ifdef HAVE_MLSLABEL
@@ -1454,6 +1490,7 @@ zfs_setprop_error(libzfs_handle_t *hdl, zfs_prop_t prop, int err,
 
 	case ERANGE:
 		if (prop == ZFS_PROP_COMPRESSION ||
+		    prop == ZFS_PROP_DNODESIZE ||
 		    prop == ZFS_PROP_RECORDSIZE) {
 			(void) zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "property setting is not allowed on "
