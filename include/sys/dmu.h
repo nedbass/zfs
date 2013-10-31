@@ -650,6 +650,7 @@ boolean_t dmu_buf_freeable(dmu_buf_t *);
 #define	DMU_OBJECT_END	(-1ULL)
 
 dmu_tx_t *dmu_tx_create(objset_t *os);
+dmu_tx_t *dmu_tx_create_dn_count(objset_t *os, int count);
 void dmu_tx_hold_write(dmu_tx_t *tx, uint64_t object, uint64_t off, int len);
 void dmu_tx_hold_free(dmu_tx_t *tx, uint64_t object, uint64_t off,
     uint64_t len);
@@ -752,7 +753,8 @@ typedef struct dmu_object_info {
 	uint8_t doi_checksum;
 	uint8_t doi_compress;
 	uint8_t doi_nblkptr;
-	uint8_t doi_pad[4];
+	uint8_t doi_count;
+	uint8_t doi_pad[3];
 	uint64_t doi_physical_blocks_512;	/* data + metadata, 512b blks */
 	uint64_t doi_max_offset;
 	uint64_t doi_fill_count;		/* number of non-empty blocks */
@@ -793,6 +795,8 @@ void dmu_object_info_from_db(dmu_buf_t *db, dmu_object_info_t *doi);
  */
 void dmu_object_size_from_db(dmu_buf_t *db, uint32_t *blksize,
     u_longlong_t *nblk512);
+
+void dmu_object_count_from_db(dmu_buf_t *db, int *count);
 
 typedef struct dmu_objset_stats {
 	uint64_t dds_num_clones; /* number of clones of this */
