@@ -501,6 +501,7 @@ static void
 dnode_sync_free(dnode_t *dn, dmu_tx_t *tx)
 {
 	int txgoff = tx->tx_txg & TXG_MASK;
+	spa_t *spa = dn->dn_objset->os_spa;
 
 	ASSERT(dmu_tx_is_syncing(tx));
 
@@ -538,7 +539,10 @@ dnode_sync_free(dnode_t *dn, dmu_tx_t *tx)
 	ASSERT(dn->dn_free_txg > 0);
 	if (dn->dn_allocated_txg != dn->dn_free_txg)
 		dmu_buf_will_dirty(&dn->dn_dbuf->db, tx);
-	bzero(dn->dn_phys, sizeof (dnode_phys_t));
+	bzero(dn->dn_phys, sizeof (dnode_phys_t) * dn->dn_count);
+
+	if (dn->dn_count > 1)
+		spa_feature_decr(spa, SPA_FEATURE_LARGE_DNODE, tx);
 
 	mutex_enter(&dn->dn_mtx);
 	dn->dn_type = DMU_OT_NONE;
@@ -568,12 +572,13 @@ dnode_sync(dnode_t *dn, dmu_tx_t *tx)
 	list_t *list = &dn->dn_dirty_records[txgoff];
 	boolean_t kill_spill = B_FALSE;
 	boolean_t freeing_dnode;
+	spa_t *spa = dn->dn_objset->os_spa;
 	ASSERTV(static const dnode_phys_t zerodn = { 0 });
 
 	ASSERT(dmu_tx_is_syncing(tx));
 	ASSERT(dnp->dn_type != DMU_OT_NONE || dn->dn_allocated_txg);
 	ASSERT(dnp->dn_type != DMU_OT_NONE ||
-	    bcmp(dnp, &zerodn, DNODE_SIZE) == 0);
+	    bcmp(dnp, &zerodn, DNODE_MIN_SIZE) == 0);
 	DNODE_VERIFY(dn);
 
 	ASSERT(dn->dn_dbuf == NULL || arc_released(dn->dn_dbuf->db_buf));
@@ -599,12 +604,24 @@ dnode_sync(dnode_t *dn, dmu_tx_t *tx)
 			/* this is a first alloc, not a realloc */
 			dnp->dn_nlevels = 1;
 			dnp->dn_nblkptr = dn->dn_nblkptr;
+			if (dn->dn_count > 1)
+				spa_feature_incr(spa, SPA_FEATURE_LARGE_DNODE,
+				    tx);
 		}
 
 		dnp->dn_type = dn->dn_type;
 		dnp->dn_bonustype = dn->dn_bonustype;
 		dnp->dn_bonuslen = dn->dn_bonuslen;
+	} else {
+		/* Decrement reference count of large_dnode feature if the
+		 * size of this dnode is shrinking to the minimum size. */
+		if (dnp->dn_nextra > 0 && dn->dn_count == 1)
+			spa_feature_decr(spa, SPA_FEATURE_LARGE_DNODE,
+			    tx);
 	}
+
+	dnp->dn_nextra = dn->dn_count - 1;
+
 	ASSERT(dnp->dn_nlevels > 1 ||
 	    BP_IS_HOLE(&dnp->dn_blkptr[0]) ||
 	    BP_IS_EMBEDDED(&dnp->dn_blkptr[0]) ||
@@ -637,7 +654,7 @@ dnode_sync(dnode_t *dn, dmu_tx_t *tx)
 			dnp->dn_bonuslen = 0;
 		else
 			dnp->dn_bonuslen = dn->dn_next_bonuslen[txgoff];
-		ASSERT(dnp->dn_bonuslen <= DN_MAX_BONUSLEN);
+		ASSERT(dnp->dn_bonuslen <= DN_BONUS_SIZE(dnp->dn_nextra + 1));
 		dn->dn_next_bonuslen[txgoff] = 0;
 	}
 
