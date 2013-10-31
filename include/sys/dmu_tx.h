@@ -57,6 +57,7 @@ struct dmu_tx {
 	uint64_t tx_txg;
 	uint64_t tx_lastsnap_txg;
 	uint64_t tx_lasttried_txg;
+	uint8_t tx_dn_slots;
 	txg_handle_t tx_txgh;
 	void *tx_tempreserve_cookie;
 	struct dmu_tx_hold *tx_needassign_txh;
@@ -171,6 +172,7 @@ extern dmu_tx_t *dmu_tx_create_assigned(struct dsl_pool *dp, uint64_t txg);
 dmu_tx_t *dmu_tx_create_dd(dsl_dir_t *dd);
 int dmu_tx_is_syncing(dmu_tx_t *tx);
 int dmu_tx_private_ok(dmu_tx_t *tx);
+int dmu_tx_dn_slots(dmu_tx_t *tx);
 void dmu_tx_add_new_object(dmu_tx_t *tx, objset_t *os, uint64_t object);
 void dmu_tx_willuse_space(dmu_tx_t *tx, int64_t delta);
 void dmu_tx_dirty_buf(dmu_tx_t *tx, struct dmu_buf_impl *db);
