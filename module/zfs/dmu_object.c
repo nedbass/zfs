@@ -32,14 +32,20 @@
 #include <sys/zfeature.h>
 
 uint64_t
-dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
-    dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
+dmu_object_alloc_impl(objset_t *os, dmu_object_type_t ot, int dnodesize,
+    int blocksize, dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
 {
 	uint64_t object;
 	uint64_t L2_dnode_count = DNODES_PER_BLOCK <<
 	    (DMU_META_DNODE(os)->dn_indblkshift - SPA_BLKPTRSHIFT);
 	dnode_t *dn = NULL;
-	int restarted = B_FALSE;
+	int restarted = B_FALSE, count;
+
+	ASSERT3S(dnodesize, >=, DNODE_MIN_SIZE);
+	ASSERT3S(dnodesize, <=, DNODE_MAX_SIZE);
+	ASSERT0(dnodesize % DNODE_MIN_SIZE);
+
+	count = dnodesize >> DNODE_SHIFT;
 
 	mutex_enter(&os->os_obj_lock);
 	for (;;) {
@@ -68,7 +74,7 @@ dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
 		 * dmu_tx_assign(), but there is currently no mechanism
 		 * to do so.
 		 */
-		(void) dnode_hold_impl(os, object, DNODE_MUST_BE_FREE,
+		(void) dnode_hold_impl(os, object, DNODE_MUST_BE_FREE, count,
 		    FTAG, &dn);
 		if (dn)
 			break;
@@ -77,7 +83,8 @@ dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
 			os->os_obj_next = object - 1;
 	}
 
-	dnode_allocate(dn, ot, blocksize, 0, bonustype, bonuslen, tx);
+	dnode_allocate(dn, ot, count, blocksize, 0, bonustype, bonuslen, tx);
+	os->os_obj_next += dn->dn_count - 1;
 	dnode_rele(dn, FTAG);
 
 	mutex_exit(&os->os_obj_lock);
@@ -86,24 +93,56 @@ dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
 	return (object);
 }
 
+uint64_t
+dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
+    dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
+{
+	return (dmu_object_alloc_impl(os,
+	    ot, os->os_dnode_sz, blocksize, bonustype, bonuslen, tx));
+}
+
 int
-dmu_object_claim(objset_t *os, uint64_t object, dmu_object_type_t ot,
-    int blocksize, dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
+dmu_object_claim_impl(objset_t *os, uint64_t object, dmu_object_type_t ot,
+    int dnodesize, int blocksize, dmu_object_type_t bonustype, int bonuslen,
+    dmu_tx_t *tx)
 {
 	dnode_t *dn;
-	int err;
+	int err, count;
+
+	ASSERT3S(dnodesize, >=, DNODE_MIN_SIZE);
+	ASSERT3S(dnodesize, <=, DNODE_MAX_SIZE);
+	ASSERT0(dnodesize % DNODE_MIN_SIZE);
+
+	count = dnodesize >> DNODE_SHIFT;
 
 	if (object == DMU_META_DNODE_OBJECT && !dmu_tx_private_ok(tx))
 		return (SET_ERROR(EBADF));
 
-	err = dnode_hold_impl(os, object, DNODE_MUST_BE_FREE, FTAG, &dn);
+	err = dnode_hold_impl(os, object, DNODE_MUST_BE_FREE, count,
+	    FTAG, &dn);
 	if (err)
 		return (err);
-	dnode_allocate(dn, ot, blocksize, 0, bonustype, bonuslen, tx);
+
+	dnode_allocate(dn, ot, count, blocksize, 0, bonustype, bonuslen, tx);
 	dnode_rele(dn, FTAG);
 
 	dmu_tx_add_new_object(tx, os, object);
 	return (0);
+}
+
+int
+dmu_object_claim(objset_t *os, uint64_t object, dmu_object_type_t ot,
+    int blocksize, dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
+{
+	/*
+	 * TODO: We should really be capturing the dnodesize used during
+	 * creation time in the ZIL log record, and then replaying the
+	 * operation with that specific dnodesize. Until that is
+	 * implemented, just use the minimum dnode size which _should_
+	 * be safe, albeit not ideal.
+	 */
+	return (dmu_object_claim_impl(os,
+	    object, ot, DNODE_MIN_SIZE, blocksize, bonustype, bonuslen, tx));
 }
 
 int
@@ -116,7 +155,7 @@ dmu_object_reclaim(objset_t *os, uint64_t object, dmu_object_type_t ot,
 	if (object == DMU_META_DNODE_OBJECT)
 		return (SET_ERROR(EBADF));
 
-	err = dnode_hold_impl(os, object, DNODE_MUST_BE_ALLOCATED,
+	err = dnode_hold_impl(os, object, DNODE_MUST_BE_ALLOCATED, 0,
 	    FTAG, &dn);
 	if (err)
 		return (err);
@@ -135,7 +174,7 @@ dmu_object_free(objset_t *os, uint64_t object, dmu_tx_t *tx)
 
 	ASSERT(object != DMU_META_DNODE_OBJECT || dmu_tx_private_ok(tx));
 
-	err = dnode_hold_impl(os, object, DNODE_MUST_BE_ALLOCATED,
+	err = dnode_hold_impl(os, object, DNODE_MUST_BE_ALLOCATED, 0,
 	    FTAG, &dn);
 	if (err)
 		return (err);
@@ -151,14 +190,36 @@ dmu_object_free(objset_t *os, uint64_t object, dmu_tx_t *tx)
 int
 dmu_object_next(objset_t *os, uint64_t *objectp, boolean_t hole, uint64_t txg)
 {
-	uint64_t offset = (*objectp + 1) << DNODE_SHIFT;
+	dnode_t *dn = NULL;
+	uint64_t offset;
 	int error;
+
+	error = dnode_hold_impl(os, *objectp, DNODE_MUST_BE_ALLOCATED, 0,
+	    FTAG, &dn);
+
+	/*
+	 * TODO: If the above dnode_hold_impl call fails, we need to
+	 * increment *objectp to prevent an infinite loop situation
+	 * occurring in dnode_object_alloc. The only safe way to do
+	 * this, since we can't get a hold on the current object index's
+	 * dnode, is to increment to beginning of the next dnode block.
+	 */
+	if (error && !(error == EINVAL && *objectp == 0))
+		goto out;
+
+	offset = (*objectp + 1) << DNODE_SHIFT;
+	if (dn) {
+		/* Skip any "extra" dnodes consumed by this one */
+		offset += (dn->dn_count - 1) * DNODE_MIN_SIZE;
+		dnode_rele(dn, FTAG);
+	}
 
 	error = dnode_next_offset(DMU_META_DNODE(os),
 	    (hole ? DNODE_FIND_HOLE : 0), &offset, 0, DNODES_PER_BLOCK, txg);
 
 	*objectp = offset >> DNODE_SHIFT;
 
+out:
 	return (error);
 }
 

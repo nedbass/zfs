@@ -654,7 +654,8 @@ typedef struct dmu_object_info {
 	uint8_t doi_checksum;
 	uint8_t doi_compress;
 	uint8_t doi_nblkptr;
-	uint8_t doi_pad[4];
+	uint8_t doi_count;
+	uint8_t doi_pad[3];
 	uint64_t doi_physical_blocks_512;	/* data + metadata, 512b blks */
 	uint64_t doi_max_offset;
 	uint64_t doi_fill_count;		/* number of non-empty blocks */

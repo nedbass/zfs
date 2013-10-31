@@ -599,6 +599,9 @@ dnode_sync(dnode_t *dn, dmu_tx_t *tx)
 		dnp->dn_bonustype = dn->dn_bonustype;
 		dnp->dn_bonuslen = dn->dn_bonuslen;
 	}
+
+	dnp->dn_nextra = dn->dn_count - 1;
+
 	ASSERT(dnp->dn_nlevels > 1 ||
 	    BP_IS_HOLE(&dnp->dn_blkptr[0]) ||
 	    BP_IS_EMBEDDED(&dnp->dn_blkptr[0]) ||
