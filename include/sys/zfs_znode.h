@@ -189,6 +189,7 @@ typedef struct znode {
 	zfs_dirlock_t	*z_dirlocks;	/* directory entry lock list */
 	kmutex_t	z_range_lock;	/* protects changes to z_range_avl */
 	avl_tree_t	z_range_avl;	/* avl tree of file range locks */
+	uint8_t		z_dn_slots;	/* number of dnode slots consumed */
 	uint8_t		z_unlinked;	/* file has been unlinked */
 	uint8_t		z_atime_dirty;	/* atime needs to be synced */
 	uint8_t		z_zn_prefetch;	/* Prefetch znodes? */

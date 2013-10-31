@@ -621,9 +621,19 @@ zap_create_claim_norm(objset_t *os, uint64_t obj, int normflags,
     dmu_object_type_t ot,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
 {
+	return (zap_create_claim_norm_slots(os, obj, normflags, ot, bonustype,
+	    bonuslen, 0, tx));
+}
+
+int
+zap_create_claim_norm_slots(objset_t *os, uint64_t obj, int normflags,
+    dmu_object_type_t ot, dmu_object_type_t bonustype, int bonuslen,
+    uint8_t slots, dmu_tx_t *tx)
+{
 	int err;
 
-	err = dmu_object_claim(os, obj, ot, 0, bonustype, bonuslen, tx);
+	err = dmu_object_claim_slots(os, obj, ot, 0, bonustype, bonuslen, slots,
+	    tx);
 	if (err != 0)
 		return (err);
 	mzap_create_impl(os, obj, normflags, 0, tx);
@@ -638,10 +648,27 @@ zap_create(objset_t *os, dmu_object_type_t ot,
 }
 
 uint64_t
+zap_create_slots(objset_t *os, dmu_object_type_t ot,
+    dmu_object_type_t bonustype, int bonuslen, uint8_t slots, dmu_tx_t *tx)
+{
+	return (zap_create_norm_slots(os, 0, ot, bonustype, bonuslen, slots,
+	    tx));
+}
+
+uint64_t
 zap_create_norm(objset_t *os, int normflags, dmu_object_type_t ot,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
 {
-	uint64_t obj = dmu_object_alloc(os, ot, 0, bonustype, bonuslen, tx);
+	return (zap_create_norm_slots(os, normflags, ot, bonustype, bonuslen, 0,
+	    tx));
+}
+
+uint64_t
+zap_create_norm_slots(objset_t *os, int normflags, dmu_object_type_t ot,
+    dmu_object_type_t bonustype, int bonuslen, uint8_t slots, dmu_tx_t *tx)
+{
+	uint64_t obj = dmu_object_alloc_slots(os, ot, 0, bonustype, bonuslen,
+	    slots, tx);
 
 	mzap_create_impl(os, obj, normflags, 0, tx);
 	return (obj);

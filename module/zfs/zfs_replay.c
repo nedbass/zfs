@@ -445,7 +445,7 @@ zfs_replay_create(zfs_sb_t *zsb, lr_create_t *lr, boolean_t byteswap)
 	ZFS_TIME_DECODE(&xva.xva_vattr.va_ctime, lr->lr_crtime);
 	xva.xva_vattr.va_nblocks = lr->lr_gen;
 
-	error = dmu_object_info(zsb->z_os, lr->lr_foid, NULL);
+	error = dmu_object_info(zsb->z_os, DN_OID_GET_OBJ(lr->lr_foid), NULL);
 	if (error != ENOENT)
 		goto out;
 
