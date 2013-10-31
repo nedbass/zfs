@@ -221,6 +221,7 @@ typedef struct {
 	uint64_t	lr_gen;		/* generation (txg of creation) */
 	uint64_t	lr_crtime[2];	/* creation time */
 	uint64_t	lr_rdev;	/* rdev of object to create */
+	uint64_t	lr_dn_count;	/* dnode count of object */
 	/* name of object to create follows this */
 	/* for symlinks, link content follows name */
 	/* for creates with xvattr data, the name follows the xvattr info */

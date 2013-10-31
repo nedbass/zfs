@@ -1336,7 +1336,7 @@ deduce_nblkptr(dmu_object_type_t bonus_type, uint64_t bonus_size)
 		return (1);
 	} else {
 		return (1 +
-		    ((DN_MAX_BONUSLEN - bonus_size) >> SPA_BLKPTRSHIFT));
+		    ((DN_OLD_MAX_BONUSLEN - bonus_size) >> SPA_BLKPTRSHIFT));
 	}
 }
 
@@ -1357,7 +1357,7 @@ restore_object(struct restorearg *ra, objset_t *os, struct drr_object *drro)
 	    P2PHASE(drro->drr_blksz, SPA_MINBLOCKSIZE) ||
 	    drro->drr_blksz < SPA_MINBLOCKSIZE ||
 	    drro->drr_blksz > SPA_MAXBLOCKSIZE ||
-	    drro->drr_bonuslen > DN_MAX_BONUSLEN) {
+	    drro->drr_bonuslen > DN_OLD_MAX_BONUSLEN) {
 		return (SET_ERROR(EINVAL));
 	}
 

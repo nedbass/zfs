@@ -85,6 +85,7 @@ struct objset {
 	zilog_t *os_zil;
 
 	/* can change, under dsl_dir's locks: */
+	uint8_t os_dn_count; /* dnode count for new objects */
 	enum zio_checksum os_checksum;
 	enum zio_compress os_compress;
 	uint8_t os_copies;

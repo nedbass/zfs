@@ -45,6 +45,7 @@
 #include <sys/spa.h>
 #include <sys/zfs_fuid.h>
 #include <sys/ddi.h>
+#include <sys/dmu_tx.h>
 #include <sys/dsl_dataset.h>
 
 /*
@@ -280,6 +281,7 @@ zfs_log_create(zilog_t *zilog, dmu_tx_t *tx, uint64_t txtype,
 	lr->lr_doid = dzp->z_id;
 	lr->lr_foid = zp->z_id;
 	lr->lr_mode = zp->z_mode;
+	lr->lr_dn_count = dmu_tx_dn_count(tx);
 	if (!IS_EPHEMERAL(zp->z_uid)) {
 		lr->lr_uid = (uint64_t)zp->z_uid;
 	} else {
