@@ -226,7 +226,7 @@ dmu_object_next(objset_t *os, uint64_t *objectp, boolean_t hole, uint64_t txg)
 	} else {
 		ASSERT3U(dn, !=, NULL);
 		/* Skip any "extra" dnodes consumed by this one */
-		offset = *objectp + (dn->dn_count * DNODE_MIN_SIZE);
+		offset = (*objectp + dn->dn_count) << DNODE_SHIFT;
 		dnode_rele(dn, FTAG);
 	}
 

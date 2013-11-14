@@ -538,10 +538,6 @@ dnode_sync_free(dnode_t *dn, dmu_tx_t *tx)
 	if (dn->dn_count > 1)
 		spa_feature_decr(spa, SPA_FEATURE_LARGE_DNODE, tx);
 
-	if (dn->dn_count > 1)
-		spa_feature_decr(spa, SPA_FEATURE_LARGE_DNODE,
-		    tx);
-
 	mutex_enter(&dn->dn_mtx);
 	dn->dn_type = DMU_OT_NONE;
 	dn->dn_maxblkid = 0;
