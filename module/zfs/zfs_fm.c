@@ -324,6 +324,8 @@ zfs_ereport_start(nvlist_t **ereport_out, nvlist_t **detector_out,
 		    DATA_TYPE_UINT32, zio->io_reexecute, NULL);
 		fm_payload_set(ereport, FM_EREPORT_PAYLOAD_ZFS_ZIO_TYPE,
 		    DATA_TYPE_UINT8, zio->io_type, NULL);
+		fm_payload_set(ereport, FM_EREPORT_PAYLOAD_ZFS_ZIO_POINTER,
+		    DATA_TYPE_UINT64, zio, NULL);
 
 		/*
 		 * If the 'size' parameter is non-zero, it indicates this is a

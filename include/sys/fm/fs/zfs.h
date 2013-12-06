@@ -96,6 +96,7 @@ extern "C" {
 #define	FM_EREPORT_PAYLOAD_ZFS_ZIO_PRIORITY	"zio_priority"
 #define	FM_EREPORT_PAYLOAD_ZFS_ZIO_REEXECUTE	"zio_reexecute"
 #define	FM_EREPORT_PAYLOAD_ZFS_ZIO_TYPE		"zio_type"
+#define	FM_EREPORT_PAYLOAD_ZFS_ZIO_POINTER	"zio_pointer"
 #define	FM_EREPORT_PAYLOAD_ZFS_PREV_STATE	"prev_state"
 #define	FM_EREPORT_PAYLOAD_ZFS_CKSUM_EXPECTED	"cksum_expected"
 #define	FM_EREPORT_PAYLOAD_ZFS_CKSUM_ACTUAL	"cksum_actual"
