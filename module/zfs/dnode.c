@@ -1224,6 +1224,7 @@ dnode_setdirty(dnode_t *dn, dmu_tx_t *tx)
 {
 	objset_t *os = dn->dn_objset;
 	uint64_t txg = tx->tx_txg;
+	int count;
 
 	if (DMU_OBJECT_IS_SPECIAL(dn->dn_object)) {
 		dsl_dataset_dirty(os->os_dsl_dataset, tx);
@@ -1270,6 +1271,18 @@ dnode_setdirty(dnode_t *dn, dmu_tx_t *tx)
 	}
 
 	mutex_exit(&os->os_lock);
+
+	/*
+	 * Shrink dirty dnodes down to the size specified in the
+	 * dnodesize dataset property. This allows the possibility of
+	 * disabling the large_dnode pool feature if all large dnodes
+	 * shrink to the minimum value (DNODE_MIN_SIZE). Do not grow
+	 * dnodes that are smaller than dnodesize, because the required
+	 * slots in the metadnode object may be already allocated.
+	 */
+	count = os->os_dnode_sz >> DNODE_SHIFT;
+	if (count < dn->dn_count)
+		dn->dn_count = count;
 
 	/*
 	 * The dnode maintains a hold on its containing dbuf as

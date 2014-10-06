@@ -219,4 +219,15 @@ zpool_feature_init(void)
 	    "com.delphix:embedded_data", "embedded_data",
 	    "Blocks which compress very well use even less space.",
 	    B_FALSE, B_TRUE, B_TRUE, NULL);
+
+	{
+	static const spa_feature_t large_dnode_deps[] = {
+		SPA_FEATURE_EXTENSIBLE_DATASET,
+		SPA_FEATURE_NONE
+	};
+	zfeature_register(SPA_FEATURE_LARGE_DNODE,
+	    "org.zfsonlinux:large_dnode", "large_dnode",
+	    "Variable on-disk size of dnodes.",
+	    B_TRUE, B_FALSE, B_FALSE, large_dnode_deps);
+	}
 }

@@ -495,6 +495,7 @@ static void
 dnode_sync_free(dnode_t *dn, dmu_tx_t *tx)
 {
 	int txgoff = tx->tx_txg & TXG_MASK;
+	spa_t *spa = dn->dn_objset->os_spa;
 
 	ASSERT(dmu_tx_is_syncing(tx));
 
@@ -534,6 +535,10 @@ dnode_sync_free(dnode_t *dn, dmu_tx_t *tx)
 		dmu_buf_will_dirty(&dn->dn_dbuf->db, tx);
 	bzero(dn->dn_phys, sizeof (dnode_phys_t));
 
+	if (dn->dn_count > 1)
+		spa_feature_decr(spa, SPA_FEATURE_LARGE_DNODE,
+		    tx);
+
 	mutex_enter(&dn->dn_mtx);
 	dn->dn_type = DMU_OT_NONE;
 	dn->dn_maxblkid = 0;
@@ -562,6 +567,7 @@ dnode_sync(dnode_t *dn, dmu_tx_t *tx)
 	list_t *list = &dn->dn_dirty_records[txgoff];
 	boolean_t kill_spill = B_FALSE;
 	boolean_t freeing_dnode;
+	spa_t *spa = dn->dn_objset->os_spa;
 	ASSERTV(static const dnode_phys_t zerodn = { 0 });
 
 	ASSERT(dmu_tx_is_syncing(tx));
@@ -593,11 +599,20 @@ dnode_sync(dnode_t *dn, dmu_tx_t *tx)
 			/* this is a first alloc, not a realloc */
 			dnp->dn_nlevels = 1;
 			dnp->dn_nblkptr = dn->dn_nblkptr;
+			if (dn->dn_count > 1)
+				spa_feature_incr(spa, SPA_FEATURE_LARGE_DNODE,
+				    tx);
 		}
 
 		dnp->dn_type = dn->dn_type;
 		dnp->dn_bonustype = dn->dn_bonustype;
 		dnp->dn_bonuslen = dn->dn_bonuslen;
+	} else {
+		/* Decrement reference count of large_dnode feature if the
+		 * size of this dnode is shrinking to the minimum size. */
+		if (dnp->dn_nextra > 0 && dn->dn_count == 1)
+			spa_feature_decr(spa, SPA_FEATURE_LARGE_DNODE,
+			    tx);
 	}
 
 	dnp->dn_nextra = dn->dn_count - 1;
