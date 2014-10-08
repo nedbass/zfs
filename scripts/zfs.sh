@@ -13,6 +13,7 @@ fi
 
 PROG=zfs.sh
 UNLOAD=
+RELOAD=
 
 usage() {
 cat << EOF
@@ -26,6 +27,7 @@ OPTIONS:
 	-h      Show this message
 	-v      Verbose
 	-u      Unload modules
+	-r      Reload modules
 	-d      Save debug log on unload
 
 MODULE-OPTIONS:
@@ -37,7 +39,7 @@ $0 zfs="zfs_prefetch_disable=1 zfs_mdcomp_disable=1"
 EOF
 }
 
-while getopts 'hvud' OPTION; do
+while getopts 'hvudr' OPTION; do
 	case $OPTION in
 	h)
 		usage
@@ -52,6 +54,9 @@ while getopts 'hvud' OPTION; do
 	d)
 		DUMP_LOG=1
 		;;
+	r)
+		RELOAD=1
+		;;
 	?)
 		usage
 		exit
@@ -63,16 +68,19 @@ if [ $(id -u) != 0 ]; then
 	die "Must run as root"
 fi
 
-if [ ${UNLOAD} ]; then
+if [ "${UNLOAD}" -o "${RELOAD}" ]; then
 	kill_zed
 	umount -t zfs -a
 	stack_check
 	unload_modules
-else
-	stack_clear
-	check_modules || die "${ERROR}"
-	load_modules "$@" || die "Failed to load modules"
-	wait_udev /dev/zfs 30 || die "'/dev/zfs' was not created"
+	if [ ${UNLOAD} ]; then
+		exit 0
+	fi
 fi
+
+stack_clear
+check_modules || die "${ERROR}"
+load_modules "$@" || die "Failed to load modules"
+wait_udev /dev/zfs 30 || die "'/dev/zfs' was not created"
 
 exit 0
