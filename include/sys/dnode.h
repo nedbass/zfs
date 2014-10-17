@@ -103,6 +103,9 @@ extern "C" {
 #define	DN_USED_BYTES(dnp) (((dnp)->dn_flags & DNODE_FLAG_USED_BYTES) ? \
 	(dnp)->dn_used : (dnp)->dn_used << SPA_MINBLOCKSHIFT)
 
+#define	DN_BONUS_SIZE(count)	((count << DNODE_SHIFT) - DNODE_CORE_SIZE - \
+	(1 << SPA_BLKPTRSHIFT))
+
 #define	EPB(blkshift, typeshift)	(1 << (blkshift - typeshift))
 
 struct dmu_buf_impl;
@@ -205,7 +208,7 @@ typedef struct dnode {
 	uint32_t dn_datablksz;		/* in bytes */
 	uint64_t dn_maxblkid;
 	uint8_t dn_next_type[TXG_SIZE];
-	uint8_t dn_count;		/* # of total dnodes consumed on-disk */
+	uint8_t dn_count;		/* metadnode slots consumed on disk */
 	uint8_t dn_next_nblkptr[TXG_SIZE];
 	uint8_t dn_next_nlevels[TXG_SIZE];
 	uint8_t dn_next_indblkshift[TXG_SIZE];
