@@ -649,7 +649,7 @@ dnode_sync(dnode_t *dn, dmu_tx_t *tx)
 			dnp->dn_bonuslen = 0;
 		else
 			dnp->dn_bonuslen = dn->dn_next_bonuslen[txgoff];
-		ASSERT(dnp->dn_bonuslen <= DN_MAX_BONUSLEN);
+		ASSERT(dnp->dn_bonuslen <= DN_BONUS_SIZE(dnp->dn_nextra + 1));
 		dn->dn_next_bonuslen[txgoff] = 0;
 	}
 

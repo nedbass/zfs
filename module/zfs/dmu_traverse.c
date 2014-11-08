@@ -322,13 +322,13 @@ traverse_visitbp(traverse_data_t *td, const dnode_phys_t *dnp,
 			goto post;
 		dnp = buf->b_data;
 
-		for (i = 0; i < epb; i++) {
+		for (i = 0; i < epb; i += dnp[i].dn_nextra + 1) {
 			prefetch_dnode_metadata(td, &dnp[i], zb->zb_objset,
 			    zb->zb_blkid * epb + i);
 		}
 
 		/* recursively visitbp() blocks below this */
-		for (i = 0; i < epb; i++) {
+		for (i = 0; i < epb; i += dnp[i].dn_nextra + 1) {
 			err = traverse_dnode(td, &dnp[i], zb->zb_objset,
 			    zb->zb_blkid * epb + i);
 			if (err != 0)

@@ -103,7 +103,7 @@ extern "C" {
 #define	DN_USED_BYTES(dnp) (((dnp)->dn_flags & DNODE_FLAG_USED_BYTES) ? \
 	(dnp)->dn_used : (dnp)->dn_used << SPA_MINBLOCKSHIFT)
 
-#define	DN_BONUS_SIZE(count)	((count << DNODE_SHIFT) - DNODE_CORE_SIZE - \
+#define	DN_BONUS_SIZE(count)	(((count) << DNODE_SHIFT) - DNODE_CORE_SIZE - \
 	(1 << SPA_BLKPTRSHIFT))
 
 #define	EPB(blkshift, typeshift)	(1 << (blkshift - typeshift))
