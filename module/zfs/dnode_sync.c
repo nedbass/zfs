@@ -539,8 +539,16 @@ dnode_sync_free(dnode_t *dn, dmu_tx_t *tx)
 		spa_feature_decr(spa, SPA_FEATURE_LARGE_DNODE,
 		    tx);
 
-p("object %llu count %d", (long long unsigned)dn->dn_object, dn->dn_count);
-
+p("object %llu ds_obj %llu count %d db { object %llu offset %llu size %llu }",
+    (long long unsigned)dn->dn_object,
+    dn->dn_objset ?
+        dn->dn_objset->os_dsl_dataset ?
+            (long long unsigned)dn->dn_objset->os_dsl_dataset->ds_object : 0
+        : 0,
+    dn->dn_count,
+    (unsigned long long)dn->dn_dbuf->db.db_object,
+    (unsigned long long)dn->dn_dbuf->db.db_offset,
+    (unsigned long long)dn->dn_dbuf->db.db_size);
 	mutex_enter(&dn->dn_mtx);
 	dn->dn_type = DMU_OT_NONE;
 	dn->dn_maxblkid = 0;

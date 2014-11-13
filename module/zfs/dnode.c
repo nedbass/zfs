@@ -217,6 +217,35 @@ dnode_verify(dnode_t *dn)
 		}
 		ASSERT3U(dn->dn_nlevels, <=, 30);
 		ASSERT(DMU_OT_IS_VALID(dn->dn_type));
+
+if (dn->dn_nblkptr == 0 || dn->dn_nblkptr > DN_MAX_NBLKPTR)
+	p("object %llu ds_obj %llu type %d assigned_txg %llu "
+	  "allocated_txg %llu free_txg %llu"
+	  "bonuslen %d bonustype %d nblkptr %d checksum %d "
+	  "compress %d nlevels %d indblkshift %d datablkshift %d "
+	  "moved %d datablkszsec %d maxblkid %llu count %d ",
+	    (long long unsigned)dn->dn_object,
+	    dn->dn_objset ?
+	        dn->dn_objset->os_dsl_dataset ?
+	            (long long unsigned)dn->dn_objset->os_dsl_dataset->ds_object : 0
+	        : 0,
+	    dn->dn_phys->dn_type,
+	    (unsigned long long)dn->dn_assigned_txg,
+	    (unsigned long long)dn->dn_allocated_txg,
+	    (unsigned long long)dn->dn_free_txg,
+	    dn->dn_bonuslen,
+	    dn->dn_bonustype,
+	    dn->dn_nblkptr,
+	    dn->dn_checksum,
+	    dn->dn_compress,
+	    dn->dn_nlevels,
+	    dn->dn_indblkshift,
+	    dn->dn_datablkshift,
+	    dn->dn_moved,
+	    dn->dn_datablkszsec,
+	    (unsigned long long)dn->dn_maxblkid,
+	    dn->dn_count);
+
 		ASSERT3U(dn->dn_nblkptr, >=, 1);
 		ASSERT3U(dn->dn_nblkptr, <=, DN_MAX_NBLKPTR);
 		ASSERT3U(dn->dn_bonuslen, <=, DN_BONUS_SIZE(dn->dn_count));
@@ -533,6 +562,13 @@ dnode_allocate(dnode_t *dn, dmu_object_type_t ot, int count, int blocksize,
 		dn->dn_nblkptr = 1 +
 		    ((DN_BONUS_SIZE(dn->dn_count) - bonuslen) >>
 		    SPA_BLKPTRSHIFT);
+
+if (dn->dn_nblkptr == 0 || dn->dn_nblkptr > 3) {
+	p("count %d bonuslen %d", dn->dn_count, bonuslen);
+	ASSERT3U(dn->dn_nblkptr, >, 0);
+	ASSERT3U(dn->dn_nblkptr, <=, 3);
+}
+
 	}
 
 	dn->dn_bonustype = bonustype;

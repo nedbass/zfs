@@ -1836,6 +1836,8 @@ ztest_replay_setattr(ztest_ds_t *zd, lr_setattr_t *lr, boolean_t byteswap)
 	dmu_buf_will_dirty(db, tx);
 
 	ASSERT3U(lr->lr_size, >=, sizeof (*bbt));
+if (lr->lr_size > db->db_size)
+	p("replay %d", zd->zd_zilog->zl_replay);
 	ASSERT3U(lr->lr_size, <=, db->db_size);
 	VERIFY0(dmu_set_bonus(db, lr->lr_size, tx));
 	bbt = ztest_bt_bonus(db);
