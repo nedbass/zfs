@@ -27,8 +27,6 @@
 #ifndef	_SYS_ARC_H
 #define	_SYS_ARC_H
 
-#include <sys/zfs_context.h>
-
 #ifdef	__cplusplus
 extern "C" {
 #endif
