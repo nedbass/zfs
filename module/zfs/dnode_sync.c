@@ -533,11 +533,13 @@ dnode_sync_free(dnode_t *dn, dmu_tx_t *tx)
 	ASSERT(dn->dn_free_txg > 0);
 	if (dn->dn_allocated_txg != dn->dn_free_txg)
 		dmu_buf_will_dirty(&dn->dn_dbuf->db, tx);
-	bzero(dn->dn_phys, sizeof (dnode_phys_t));
+	bzero(dn->dn_phys, sizeof (dnode_phys_t) * dn->dn_count);
 
 	if (dn->dn_count > 1)
 		spa_feature_decr(spa, SPA_FEATURE_LARGE_DNODE,
 		    tx);
+
+p("object %llu count %d", (long long unsigned)dn->dn_object, dn->dn_count);
 
 	mutex_enter(&dn->dn_mtx);
 	dn->dn_type = DMU_OT_NONE;
