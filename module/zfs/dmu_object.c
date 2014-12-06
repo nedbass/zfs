@@ -97,8 +97,15 @@ uint64_t
 dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
 {
+	int dnodesize;
+
+	if (bonuslen > 0)
+		dnodesize = P2ROUNDUP(bonuslen + (1 << SPA_BLKPTRSHIFT) +
+		    DNODE_CORE_SIZE, DNODE_MIN_SIZE);
+	else
+		dnodesize = os->os_dnode_sz;
 	return (dmu_object_alloc_impl(os,
-	    ot, os->os_dnode_sz, blocksize, bonustype, bonuslen, tx));
+	    ot, dnodesize, blocksize, bonustype, bonuslen, tx));
 }
 
 int
@@ -134,6 +141,13 @@ int
 dmu_object_claim(objset_t *os, uint64_t object, dmu_object_type_t ot,
     int blocksize, dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
 {
+	int dnodesize;
+
+	if (bonuslen > 0)
+		dnodesize = P2ROUNDUP(bonuslen + (1 << SPA_BLKPTRSHIFT) +
+		    DNODE_CORE_SIZE, DNODE_MIN_SIZE);
+	else
+		dnodesize = os->os_dnode_sz;
 	/*
 	 * TODO: We should really be capturing the dnodesize used during
 	 * creation time in the ZIL log record, and then replaying the
@@ -142,7 +156,7 @@ dmu_object_claim(objset_t *os, uint64_t object, dmu_object_type_t ot,
 	 * be safe, albeit not ideal.
 	 */
 	return (dmu_object_claim_impl(os,
-	    object, ot, DNODE_MIN_SIZE, blocksize, bonustype, bonuslen, tx));
+	    object, ot, dnodesize, blocksize, bonustype, bonuslen, tx));
 }
 
 int

@@ -1378,7 +1378,7 @@ ztest_bt_bonus(dmu_buf_t *db)
 #define	lrz_blocksize	lr_uid
 #define	lrz_ibshift	lr_gid
 #define	lrz_bonustype	lr_rdev
-#define	lrz_bonuslen	lr_crtime[1]
+#define	lrz_count	lr_crtime[1]
 
 static void
 ztest_log_create(ztest_ds_t *zd, dmu_tx_t *tx, lr_create_t *lr)
@@ -1520,21 +1520,21 @@ ztest_replay_create(ztest_ds_t *zd, lr_create_t *lr, boolean_t byteswap)
 		if (lr->lr_foid == 0) {
 			lr->lr_foid = zap_create(os,
 			    lr->lrz_type, lr->lrz_bonustype,
-			    lr->lrz_bonuslen, tx);
+			    DN_BONUS_SIZE(lr->lrz_count), tx);
 		} else {
 			error = zap_create_claim(os, lr->lr_foid,
 			    lr->lrz_type, lr->lrz_bonustype,
-			    lr->lrz_bonuslen, tx);
+			    DN_BONUS_SIZE(lr->lrz_count), tx);
 		}
 	} else {
 		if (lr->lr_foid == 0) {
 			lr->lr_foid = dmu_object_alloc(os,
 			    lr->lrz_type, 0, lr->lrz_bonustype,
-			    lr->lrz_bonuslen, tx);
+			    DN_BONUS_SIZE(lr->lrz_count), tx);
 		} else {
 			error = dmu_object_claim(os, lr->lr_foid,
 			    lr->lrz_type, 0, lr->lrz_bonustype,
-			    lr->lrz_bonuslen, tx);
+			    DN_BONUS_SIZE(lr->lrz_count), tx);
 		}
 	}
 
@@ -2077,7 +2077,7 @@ ztest_create(ztest_ds_t *zd, ztest_od_t *od, int count)
 		lr->lrz_blocksize = od->od_crblocksize;
 		lr->lrz_ibshift = ztest_random_ibshift();
 		lr->lrz_bonustype = DMU_OT_UINT64_OTHER;
-		lr->lrz_bonuslen = dmu_bonus_max();
+		lr->lrz_count = zd->zd_os->os_dnode_sz >> DNODE_SHIFT;
 		lr->lr_gen = od->od_crgen;
 		lr->lr_crtime[0] = time(NULL);
 
