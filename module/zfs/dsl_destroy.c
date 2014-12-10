@@ -910,7 +910,7 @@ dsl_destroy_head(const char *name)
 			uint64_t prev_snap_txg =
 			    dmu_objset_ds(os)->ds_phys->ds_prev_snap_txg;
 			for (obj = 0; error == 0;
-			    error = dmu_object_next(os, &obj, FALSE,
+			    error = dmu_object_next(os, &obj, NULL, FALSE,
 			    prev_snap_txg))
 				(void) dmu_free_long_object(os, obj);
 			/* sync out all frees */

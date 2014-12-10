@@ -364,11 +364,16 @@ int dmu_object_free(objset_t *os, uint64_t object, dmu_tx_t *tx);
  * object which is allocated.  Ignore objects which have not been
  * modified since txg.
  *
+ * The countp paramater is output-only.  It will be updated to reflect
+ * the size (in metadnode slots) of the allocated object preceding the
+ * one returned in objectp. It is only valid if the hole parameter is
+ * true and should be NULL otherwise.
+ *
  * XXX Can only be called on a objset with no dirty data.
  *
  * Returns 0 on success, or ENOENT if there are no more objects.
  */
-int dmu_object_next(objset_t *os, uint64_t *objectp,
+int dmu_object_next(objset_t *os, uint64_t *objectp, int *countp,
     boolean_t hole, uint64_t txg);
 
 /*

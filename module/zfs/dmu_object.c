@@ -49,6 +49,7 @@ dmu_object_alloc_impl(objset_t *os, dmu_object_type_t ot, int dnodesize,
 
 	mutex_enter(&os->os_obj_lock);
 	for (;;) {
+		int prevcnt;
 		object = os->os_obj_next;
 		/*
 		 * Each time we polish off an L2 bp worth of dnodes
@@ -66,7 +67,7 @@ dmu_object_alloc_impl(objset_t *os, dmu_object_type_t ot, int dnodesize,
 			if (error == 0)
 				object = offset >> DNODE_SHIFT;
 		}
-		os->os_obj_next = ++object;
+		os->os_obj_next += count;
 
 		/*
 		 * XXX We should check for an i/o error here and return
@@ -79,8 +80,8 @@ dmu_object_alloc_impl(objset_t *os, dmu_object_type_t ot, int dnodesize,
 		if (dn)
 			break;
 
-		if (dmu_object_next(os, &object, B_TRUE, 0) == 0)
-			os->os_obj_next = object - 1;
+		if (dmu_object_next(os, &object, &prevcnt, B_TRUE, 0) == 0)
+			os->os_obj_next = object - prevcnt;
 	}
 
 	dnode_allocate(dn, ot, count, blocksize, 0, bonustype, bonuslen, tx);
@@ -202,11 +203,14 @@ dmu_object_free(objset_t *os, uint64_t object, dmu_tx_t *tx)
 }
 
 int
-dmu_object_next(objset_t *os, uint64_t *objectp, boolean_t hole, uint64_t txg)
+dmu_object_next(objset_t *os, uint64_t *objectp, int *countp, boolean_t hole,
+    uint64_t txg)
 {
 	dnode_t *dn = NULL;
 	uint64_t offset;
 	int error;
+
+	ASSERT(countp == NULL || hole);
 
 	error = dnode_hold_impl(os, *objectp, DNODE_MUST_BE_ALLOCATED, 0,
 	    FTAG, &dn);
@@ -214,7 +218,7 @@ dmu_object_next(objset_t *os, uint64_t *objectp, boolean_t hole, uint64_t txg)
 	/*
 	 * TODO: If the above dnode_hold_impl call fails, we need to
 	 * increment *objectp to prevent an infinite loop situation
-	 * occurring in dnode_object_alloc. The only safe way to do
+	 * occurring in dmu_object_alloc. The only safe way to do
 	 * this, since we can't get a hold on the current object index's
 	 * dnode, is to increment to beginning of the next dnode block.
 	 */
@@ -225,6 +229,8 @@ dmu_object_next(objset_t *os, uint64_t *objectp, boolean_t hole, uint64_t txg)
 	if (dn) {
 		/* Skip any "extra" dnodes consumed by this one */
 		offset += (dn->dn_count - 1) * DNODE_MIN_SIZE;
+		if (countp && hole)
+			*countp = dn->dn_count;
 		dnode_rele(dn, FTAG);
 	}
 

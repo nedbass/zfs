@@ -1397,7 +1397,8 @@ dmu_objset_userspace_upgrade(objset_t *os)
 	 * independently.
 	 */
 
-	for (obj = 0; err == 0; err = dmu_object_next(os, &obj, FALSE, 0)) {
+	for (obj = 0; err == 0;
+	    err = dmu_object_next(os, &obj, NULL, FALSE, 0)) {
 		dmu_tx_t *tx;
 		dmu_buf_t *db;
 		int objerr;

@@ -623,7 +623,7 @@ traverse_pool(spa_t *spa, uint64_t txg_start, int flags,
 
 	/* visit each dataset */
 	for (obj = 1; err == 0;
-	    err = dmu_object_next(mos, &obj, FALSE, txg_start)) {
+	    err = dmu_object_next(mos, &obj, NULL, FALSE, txg_start)) {
 		dmu_object_info_t doi;
 
 		err = dmu_object_info(mos, obj, &doi);

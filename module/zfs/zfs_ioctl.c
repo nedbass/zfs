@@ -4671,7 +4671,7 @@ zfs_ioc_next_obj(zfs_cmd_t *zc)
 	if (error != 0)
 		return (error);
 
-	error = dmu_object_next(os, &zc->zc_obj, B_FALSE,
+	error = dmu_object_next(os, &zc->zc_obj, NULL, B_FALSE,
 	    os->os_dsl_dataset->ds_phys->ds_prev_snap_txg);
 
 	dmu_objset_rele(os, FTAG);
