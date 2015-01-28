@@ -61,6 +61,29 @@ extern void __dprintf(const char *file, const char *func,
 #define	dprintf(...) ((void)0)
 #endif /* HAVE_DECLARE_EVENT_CLASS || !_KERNEL */
 
+#ifdef _KERNEL
+
+#define p(fmt, ...) \
+	{ \
+	char *__s = kmem_alloc(4096, KM_PUSHPAGE); \
+	snprintf(__s, 128, "%s:%d:%s() ", __FILE__, __LINE__, __func__); \
+	printk(KERN_ERR "%s" fmt "\n", __s, __VA_ARGS__); \
+	kmem_free(__s, 4096); \
+	}
+
+#else
+
+#define p(fmt, ...) \
+	{ \
+	char __s[128]; \
+	snprintf(__s, 128, "%s:%d:%s() ", strrchr(__FILE__, '/') + 1, __LINE__, \
+		 __func__); \
+	printf("%s" fmt "\n", __s, __VA_ARGS__); \
+	fflush(stdout); \
+	}
+
+#endif
+
 extern void zfs_panic_recover(const char *fmt, ...);
 
 typedef struct zfs_dbgmsg {
