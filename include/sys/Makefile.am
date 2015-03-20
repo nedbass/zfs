@@ -54,6 +54,7 @@ COMMON_H = \
 	$(top_srcdir)/include/sys/trace_dmu.h \
 	$(top_srcdir)/include/sys/trace_dnode.h \
 	$(top_srcdir)/include/sys/trace_txg.h \
+	$(top_srcdir)/include/sys/trace_zap.h \
 	$(top_srcdir)/include/sys/trace_zil.h \
 	$(top_srcdir)/include/sys/trace_zrlock.h \
 	$(top_srcdir)/include/sys/txg.h \

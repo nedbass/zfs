@@ -47,6 +47,7 @@
 #include <sys/refcount.h>
 #include <sys/zap_impl.h>
 #include <sys/zap_leaf.h>
+#include <sys/trace_zap.h>
 
 int fzap_default_block_shift = 14; /* 16k blocksize */
 
