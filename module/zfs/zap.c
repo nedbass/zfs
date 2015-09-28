@@ -80,6 +80,7 @@ fzap_upgrade(zap_t *zap, dmu_tx_t *tx, zap_flags_t flags)
 
 	ASSERT(RW_WRITE_HELD(&zap->zap_rwlock));
 	zap->zap_ismicro = FALSE;
+	zap->zap_istiny = FALSE;
 
 	zap->zap_dbu.dbu_evict_func = zap_evict;
 

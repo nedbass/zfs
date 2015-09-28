@@ -100,6 +100,7 @@ struct objset {
 	zfs_sync_type_t os_sync;
 	zfs_redundant_metadata_type_t os_redundant_metadata;
 	int os_recordsize;
+	uint64_t os_zap_default;	/* default ZAP type */
 
 	/* no lock needed: */
 	struct dmu_tx *os_synctx; /* XXX sketchy */

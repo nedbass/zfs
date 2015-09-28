@@ -210,6 +210,13 @@ zfs_prop_init(void)
 		{ NULL }
 	};
 
+	static zprop_index_t zap_default_table[] = {
+		{ "micro",	ZFS_ZAP_MICRO },
+		{ "tiny",	ZFS_ZAP_TINY },
+		{ "fat",	ZFS_ZAP_FAT },
+		{ NULL }
+	};
+
 	static zprop_index_t redundant_metadata_table[] = {
 		{ "all",	ZFS_REDUNDANT_METADATA_ALL },
 		{ "most",	ZFS_REDUNDANT_METADATA_MOST },
@@ -270,6 +277,10 @@ zfs_prop_init(void)
 	zprop_register_index(ZFS_PROP_XATTR, "xattr", ZFS_XATTR_DIR,
 	    PROP_INHERIT, ZFS_TYPE_FILESYSTEM | ZFS_TYPE_SNAPSHOT,
 	    "on | off | dir | sa", "XATTR", xattr_table);
+	zprop_register_index(ZFS_PROP_ZAP_DEFAULT, "zap_default_type",
+	    ZFS_ZAP_MICRO, PROP_INHERIT,
+	    ZFS_TYPE_FILESYSTEM | ZFS_TYPE_SNAPSHOT, "micro | tiny | fat",
+	    "zapdef", zap_default_table);
 
 	/* inherit index (boolean) properties */
 	zprop_register_index(ZFS_PROP_ATIME, "atime", 1, PROP_INHERIT,

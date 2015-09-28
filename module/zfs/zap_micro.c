@@ -49,6 +49,8 @@ zap_getflags(zap_t *zap)
 {
 	if (zap->zap_ismicro)
 		return (0);
+	if (zap->zap_istiny)
+		return (zap_t_phys(zap)->tz_flags);
 	return (zap_f_phys(zap)->zap_flags);
 }
 
@@ -235,6 +237,26 @@ mzap_byteswap(mzap_phys_t *buf, size_t size)
 	}
 }
 
+static void
+tzap_byteswap(tzap_phys_t *buf, size_t size)
+{
+	int i, max;
+	buf->tz_block_type = BSWAP_64(buf->tz_block_type);
+	buf->tz_salt = BSWAP_64(buf->tz_salt);
+	buf->tz_normflags = BSWAP_64(buf->tz_normflags);
+	max = (size / TZAP_ENT_LEN) - 1;
+	for (i = 0; i < max; i++) {
+		int j;
+		buf->tz_chunk[i].tze_num_ints =
+		    BSWAP_16(buf->tz_chunk[i].tze_num_ints);
+		for (j = 0; j < buf->tz_chunk[i].tze_num_ints; j++)
+			buf->tz_chunk[i].tze_value[j] =
+			    BSWAP_64(buf->tz_chunk[i].tze_value[j]);
+		buf->tz_chunk[i].tze_cd =
+		    BSWAP_32(buf->tz_chunk[i].tze_cd);
+	}
+}
+
 void
 zap_byteswap(void *buf, size_t size)
 {
@@ -245,6 +267,9 @@ zap_byteswap(void *buf, size_t size)
 	if (block_type == ZBT_MICRO || block_type == BSWAP_64(ZBT_MICRO)) {
 		/* ASSERT(magic == ZAP_LEAF_MAGIC); */
 		mzap_byteswap(buf, size);
+	} else if (block_type == ZBT_TINY || block_type == BSWAP_64(ZBT_TINY)) {
+		/* ASSERT(magic == ZAP_LEAF_MAGIC); */
+		tzap_byteswap(buf, size);
 	} else {
 		fzap_byteswap(buf, size);
 	}
@@ -376,11 +401,14 @@ mzap_open(objset_t *os, uint64_t obj, dmu_buf_t *db)
 	zap->zap_object = obj;
 	zap->zap_dbuf = db;
 
-	if (*(uint64_t *)db->db_data != ZBT_MICRO) {
+	if (*(uint64_t *)db->db_data != ZBT_MICRO &&
+	    *(uint64_t *)db->db_data != ZBT_TINY) {
 		mutex_init(&zap->zap_f.zap_num_entries_mtx, 0, 0, 0);
 		zap->zap_f.zap_block_shift = highbit64(db->db_size) - 1;
-	} else {
+	} else if (*(uint64_t *)db->db_data == ZBT_MICRO) {
 		zap->zap_ismicro = TRUE;
+	} else {
+		zap->zap_istiny = TRUE;
 	}
 
 	/*
@@ -394,7 +422,7 @@ mzap_open(objset_t *os, uint64_t obj, dmu_buf_t *db)
 	if (winner != NULL) {
 		rw_exit(&zap->zap_rwlock);
 		rw_destroy(&zap->zap_rwlock);
-		if (!zap->zap_ismicro)
+		if (!zap->zap_ismicro && !zap->zap_istiny)
 			mutex_destroy(&zap->zap_f.zap_num_entries_mtx);
 		kmem_free(zap, sizeof (zap_t));
 		return (winner);
@@ -417,6 +445,26 @@ mzap_open(objset_t *os, uint64_t obj, dmu_buf_t *db)
 				zn = zap_name_alloc(zap, mze->mze_name,
 				    MT_EXACT);
 				mze_insert(zap, i, zn->zn_hash);
+				zap_name_free(zn);
+			}
+		}
+	} else if (zap->zap_istiny) {
+		zap->zap_salt = zap_t_phys(zap)->tz_salt;
+		zap->zap_normflags = zap_t_phys(zap)->tz_normflags;
+		zap->zap_m.zap_num_chunks = db->db_size / TZAP_ENT_LEN - 1;
+		avl_create(&zap->zap_m.zap_avl, tze_compare,
+		    sizeof (tzap_ent_t), offsetof(tzap_ent_t, tze_node));
+
+		for (i = 0; i < zap->zap_m.zap_num_chunks; i++) {
+			tzap_ent_phys_t *tze =
+			    &zap_t_phys(zap)->tz_chunk[i];
+			if (tze->tze_name[0]) {
+				zap_name_t *zn;
+
+				zap->zap_m.zap_num_entries++;
+				zn = zap_name_alloc(zap, tze->tze_name,
+				    MT_EXACT);
+				tze_insert(zap, i, zn->zn_hash);
 				zap_name_free(zn);
 			}
 		}
@@ -478,9 +526,11 @@ zap_lockdir(objset_t *os, uint64_t obj, dmu_tx_t *tx,
 	 * can only be different if it was upgraded from micro to fat,
 	 * and micro wanted WRITER but fat only needs READER.
 	 */
-	lt = (!zap->zap_ismicro && fatreader) ? RW_READER : lti;
+	lt = (!zap->zap_ismicro && !zap->zap_istiny && fatreader) ?
+	    RW_READER : lti;
 	rw_enter(&zap->zap_rwlock, lt);
-	if (lt != ((!zap->zap_ismicro && fatreader) ? RW_READER : lti)) {
+	if (lt != ((!zap->zap_ismicro && !zap->zap_istiny && fatreader) ?
+	    RW_READER : lti)) {
 		/* it was upgraded, now we only need reader */
 		ASSERT(lt == RW_WRITER);
 		ASSERT(RW_READER ==
@@ -496,13 +546,14 @@ zap_lockdir(objset_t *os, uint64_t obj, dmu_tx_t *tx,
 
 	ASSERT3P(zap->zap_dbuf, ==, db);
 
-	ASSERT(!zap->zap_ismicro ||
+	ASSERT((!zap->zap_ismicro && !zap->zap_istiny) ||
 	    zap->zap_m.zap_num_entries <= zap->zap_m.zap_num_chunks);
+
 	if (zap->zap_ismicro && tx && adding &&
 	    zap->zap_m.zap_num_entries == zap->zap_m.zap_num_chunks) {
 		uint64_t newsz = db->db_size + SPA_MINBLOCKSIZE;
 		if (newsz > MZAP_MAX_BLKSZ) {
-			dprintf("upgrading obj %llu: num_entries=%u\n",
+			dprintf("upgrading mzap obj %llu: num_entries=%u\n",
 			    obj, zap->zap_m.zap_num_entries);
 			*zapp = zap;
 			return (mzap_upgrade(zapp, tx, 0));
@@ -511,6 +562,19 @@ zap_lockdir(objset_t *os, uint64_t obj, dmu_tx_t *tx,
 		ASSERT0(err);
 		zap->zap_m.zap_num_chunks =
 		    db->db_size / MZAP_ENT_LEN - 1;
+	} else if (zap->zap_istiny && tx && adding &&
+	    zap->zap_m.zap_num_entries == zap->zap_m.zap_num_chunks) {
+		uint64_t newsz = db->db_size + SPA_MINBLOCKSIZE;
+		if (newsz > TZAP_MAX_BLKSZ) {
+			dprintf("upgrading tzap obj %llu: num_entries=%u\n",
+			    obj, zap->zap_m.zap_num_entries);
+			*zapp = zap;
+			return (tzap_upgrade(zapp, tx, 0));
+		}
+		err = dmu_object_set_blocksize(os, obj, newsz, 0, tx);
+		ASSERT0(err);
+		zap->zap_m.zap_num_chunks =
+		    db->db_size / TZAP_ENT_LEN - 1;
 	}
 
 	*zapp = zap;
@@ -548,7 +612,7 @@ mzap_upgrade(zap_t **zapp, dmu_tx_t *tx, zap_flags_t flags)
 		}
 	}
 
-	dprintf("upgrading obj=%llu with %u chunks\n",
+	dprintf("upgrading mzap obj=%llu with %u chunks\n",
 	    zap->zap_object, nchunks);
 	/* XXX destroy the avl later, so we can use the stored hash value */
 	mze_destroy(zap);
@@ -598,12 +662,47 @@ mzap_create_impl(objset_t *os, uint64_t obj, int normflags, zap_flags_t flags,
 	zp->mz_normflags = normflags;
 	dmu_buf_rele(db, FTAG);
 
-	if (flags != 0) {
+	if (flags != 0 || os->os_zap_default == ZFS_ZAP_FAT) {
 		zap_t *zap;
 		/* Only fat zap supports flags; upgrade immediately. */
 		VERIFY(0 == zap_lockdir(os, obj, tx, RW_WRITER,
 		    B_FALSE, B_FALSE, &zap));
 		VERIFY3U(0, ==, mzap_upgrade(&zap, tx, flags));
+		zap_unlockdir(zap);
+	}
+}
+
+void
+tzap_create_impl(objset_t *os, uint64_t obj, int normflags, zap_flags_t flags,
+    dmu_tx_t *tx)
+{
+	dmu_buf_t *db;
+	tzap_phys_t *zp;
+
+	VERIFY(0 == dmu_buf_hold(os, obj, 0, FTAG, &db, DMU_READ_NO_PREFETCH));
+
+#ifdef ZFS_DEBUG
+	{
+		dmu_object_info_t doi;
+		dmu_object_info_from_db(db, &doi);
+		ASSERT3U(DMU_OT_BYTESWAP(doi.doi_type), ==, DMU_BSWAP_ZAP);
+	}
+#endif
+
+	dmu_buf_will_dirty(db, tx);
+	zp = db->db_data;
+	zp->tz_block_type = ZBT_TINY;
+	zp->tz_salt = ((uintptr_t)db ^ (uintptr_t)tx ^ (obj << 1)) | 1ULL;
+	zp->tz_normflags = normflags;
+	zp->tz_flags = flags;
+	dmu_buf_rele(db, FTAG);
+
+	/* XXX update _uint64 functions to support tinyzap */
+	if (flags & ZAP_FLAG_UINT64_KEY || os->os_zap_default == ZFS_ZAP_FAT) {
+		zap_t *zap;
+		VERIFY(0 == zap_lockdir(os, obj, tx, RW_WRITER,
+		    B_FALSE, B_FALSE, &zap));
+		VERIFY3U(0, ==, tzap_upgrade(&zap, tx, flags));
 		zap_unlockdir(zap);
 	}
 }
@@ -626,7 +725,11 @@ zap_create_claim_norm(objset_t *os, uint64_t obj, int normflags,
 	err = dmu_object_claim(os, obj, ot, 0, bonustype, bonuslen, tx);
 	if (err != 0)
 		return (err);
-	mzap_create_impl(os, obj, normflags, 0, tx);
+
+	if (os->os_zap_default == ZFS_ZAP_TINY)
+		tzap_create_impl(os, obj, normflags, 0, tx);
+	else
+		mzap_create_impl(os, obj, normflags, 0, tx);
 	return (0);
 }
 
@@ -643,7 +746,11 @@ zap_create_norm(objset_t *os, int normflags, dmu_object_type_t ot,
 {
 	uint64_t obj = dmu_object_alloc(os, ot, 0, bonustype, bonuslen, tx);
 
-	mzap_create_impl(os, obj, normflags, 0, tx);
+	if (os->os_zap_default == ZFS_ZAP_TINY)
+		tzap_create_impl(os, obj, normflags, 0, tx);
+	else
+		mzap_create_impl(os, obj, normflags, 0, tx);
+
 	return (obj);
 }
 
@@ -662,7 +769,11 @@ zap_create_flags(objset_t *os, int normflags, zap_flags_t flags,
 	VERIFY(dmu_object_set_blocksize(os, obj,
 	    1ULL << leaf_blockshift, indirect_blockshift, tx) == 0);
 
-	mzap_create_impl(os, obj, normflags, flags, tx);
+	if (os->os_zap_default == ZFS_ZAP_TINY)
+		tzap_create_impl(os, obj, normflags, flags, tx);
+	else
+		mzap_create_impl(os, obj, normflags, flags, tx);
+
 	return (obj);
 }
 
@@ -687,6 +798,8 @@ zap_evict(void *dbu)
 
 	if (zap->zap_ismicro)
 		mze_destroy(zap);
+	else if (zap->zap_istiny)
+		tze_destroy(zap);
 	else
 		mutex_destroy(&zap->zap_f.zap_num_entries_mtx);
 
@@ -702,7 +815,7 @@ zap_count(objset_t *os, uint64_t zapobj, uint64_t *count)
 	err = zap_lockdir(os, zapobj, NULL, RW_READER, TRUE, FALSE, &zap);
 	if (err)
 		return (err);
-	if (!zap->zap_ismicro) {
+	if (!zap->zap_ismicro && !zap->zap_istiny) {
 		err = fzap_count(zap, count);
 	} else {
 		*count = zap->zap_m.zap_num_entries;
@@ -773,6 +886,7 @@ zap_lookup_norm(objset_t *os, uint64_t zapobj, const char *name,
 	zap_t *zap;
 	int err;
 	mzap_ent_t *mze;
+	tzap_ent_t *tze;
 	zap_name_t *zn;
 
 	err = zap_lockdir(os, zapobj, NULL, RW_READER, TRUE, FALSE, &zap);
@@ -784,10 +898,10 @@ zap_lookup_norm(objset_t *os, uint64_t zapobj, const char *name,
 		return (SET_ERROR(ENOTSUP));
 	}
 
-	if (!zap->zap_ismicro) {
+	if (!zap->zap_ismicro && !zap->zap_istiny) {
 		err = fzap_lookup(zn, integer_size, num_integers, buf,
 		    realname, rn_len, ncp);
-	} else {
+	} else if (zap->zap_ismicro) {
 		mze = mze_find(zn);
 		if (mze == NULL) {
 			err = SET_ERROR(ENOENT);
@@ -804,6 +918,30 @@ zap_lookup_norm(objset_t *os, uint64_t zapobj, const char *name,
 				if (ncp) {
 					*ncp = mzap_normalization_conflict(zap,
 					    zn, mze);
+				}
+			}
+		}
+	} else {
+		tze = tze_find(zn);
+		if (tze == NULL) {
+			err = SET_ERROR(ENOENT);
+		} else {
+			if (num_integers < 1) {
+				err = SET_ERROR(EOVERFLOW);
+			} else if (integer_size != 8) {
+				err = SET_ERROR(EINVAL);
+			} else {
+				int i;
+				int num_ints = TZE_PHYS(zap, tze)->tze_num_ints;
+				for (i=0; i < num_ints; i++) {
+					*(uint64_t *)(buf + i * integer_size) =
+					    TZE_PHYS(zap, tze)->tze_value[i];
+				}
+				(void) strlcpy(realname,
+				    TZE_PHYS(zap, tze)->tze_name, rn_len);
+				if (ncp) {
+					*ncp = tzap_normalization_conflict(zap,
+					    zn, tze);
 				}
 			}
 		}
@@ -877,6 +1015,7 @@ zap_length(objset_t *os, uint64_t zapobj, const char *name,
 	zap_t *zap;
 	int err;
 	mzap_ent_t *mze;
+	tzap_ent_t *tze;
 	zap_name_t *zn;
 
 	err = zap_lockdir(os, zapobj, NULL, RW_READER, TRUE, FALSE, &zap);
@@ -887,9 +1026,9 @@ zap_length(objset_t *os, uint64_t zapobj, const char *name,
 		zap_unlockdir(zap);
 		return (SET_ERROR(ENOTSUP));
 	}
-	if (!zap->zap_ismicro) {
+	if (!zap->zap_ismicro && !zap->zap_istiny) {
 		err = fzap_length(zn, integer_size, num_integers);
-	} else {
+	} else if (zap->zap_ismicro) {
 		mze = mze_find(zn);
 		if (mze == NULL) {
 			err = SET_ERROR(ENOENT);
@@ -898,6 +1037,16 @@ zap_length(objset_t *os, uint64_t zapobj, const char *name,
 				*integer_size = 8;
 			if (num_integers)
 				*num_integers = 1;
+		}
+	} else {
+		tze = tze_find(zn);
+		if (tze == NULL) {
+			err = SET_ERROR(ENOENT);
+		} else {
+			if (integer_size)
+				*integer_size = 8;
+			if (num_integers)
+				*num_integers = tze->tze_num_ints;
 		}
 	}
 	zap_name_free(zn);
@@ -980,6 +1129,7 @@ zap_add(objset_t *os, uint64_t zapobj, const char *key,
 	zap_t *zap;
 	int err;
 	mzap_ent_t *mze;
+	tzap_ent_t *tze;
 	const uint64_t *intval = val;
 	zap_name_t *zn;
 
@@ -991,21 +1141,34 @@ zap_add(objset_t *os, uint64_t zapobj, const char *key,
 		zap_unlockdir(zap);
 		return (SET_ERROR(ENOTSUP));
 	}
-	if (!zap->zap_ismicro) {
+	if (!zap->zap_ismicro && !zap->zap_istiny) {
 		err = fzap_add(zn, integer_size, num_integers, val, tx);
 		zap = zn->zn_zap;	/* fzap_add() may change zap */
-	} else if (integer_size != 8 || num_integers != 1 ||
-	    strlen(key) >= MZAP_NAME_LEN) {
+	} else if (zap->zap_istiny && (integer_size != 8 || num_integers > 8 ||
+	    strlen(key) >= TZAP_NAME_LEN)) {
+		err = tzap_upgrade(&zn->zn_zap, tx, 0);
+		if (err == 0)
+			err = fzap_add(zn, integer_size, num_integers, val, tx);
+		zap = zn->zn_zap;	/* fzap_add() may change zap */
+	} else if (zap->zap_ismicro && (integer_size != 8 ||
+	    num_integers != 1 || strlen(key) >= MZAP_NAME_LEN)) {
 		err = mzap_upgrade(&zn->zn_zap, tx, 0);
 		if (err == 0)
 			err = fzap_add(zn, integer_size, num_integers, val, tx);
 		zap = zn->zn_zap;	/* fzap_add() may change zap */
-	} else {
+	} else if (zap->zap_ismicro) {
 		mze = mze_find(zn);
 		if (mze != NULL) {
 			err = SET_ERROR(EEXIST);
 		} else {
 			mzap_addent(zn, *intval);
+		}
+	} else {
+		tze = tze_find(zn);
+		if (tze != NULL) {
+			err = SET_ERROR(EEXIST);
+		} else {
+			tzap_addent(zn, num_integers, val);
 		}
 	}
 	ASSERT(zap == zn->zn_zap);
@@ -1045,7 +1208,6 @@ zap_update(objset_t *os, uint64_t zapobj, const char *name,
     int integer_size, uint64_t num_integers, const void *val, dmu_tx_t *tx)
 {
 	zap_t *zap;
-	mzap_ent_t *mze;
 	const uint64_t *intval = val;
 	zap_name_t *zn;
 	int err;
@@ -1069,11 +1231,20 @@ zap_update(objset_t *os, uint64_t zapobj, const char *name,
 		zap_unlockdir(zap);
 		return (SET_ERROR(ENOTSUP));
 	}
-	if (!zap->zap_ismicro) {
+	if (!zap->zap_ismicro && !zap->zap_istiny) {
 		err = fzap_update(zn, integer_size, num_integers, val, tx);
 		zap = zn->zn_zap;	/* fzap_update() may change zap */
-	} else if (integer_size != 8 || num_integers != 1 ||
-	    strlen(name) >= MZAP_NAME_LEN) {
+	} else if (zap->zap_istiny && (integer_size != 8 || num_integers > 8 ||
+	    strlen(name) >= TZAP_NAME_LEN)) {
+		dprintf("upgrading obj %llu: intsz=%u numint=%llu name=%s\n",
+		    zapobj, integer_size, num_integers, name);
+		err = tzap_upgrade(&zn->zn_zap, tx, 0);
+		if (err == 0)
+			err = fzap_update(zn, integer_size, num_integers,
+			    val, tx);
+		zap = zn->zn_zap;	/* fzap_update() may change zap */
+	} else if (zap->zap_ismicro && (integer_size != 8 ||
+	    num_integers != 1 || strlen(name) >= MZAP_NAME_LEN)) {
 		dprintf("upgrading obj %llu: intsz=%u numint=%llu name=%s\n",
 		    zapobj, integer_size, num_integers, name);
 		err = mzap_upgrade(&zn->zn_zap, tx, 0);
@@ -1081,13 +1252,23 @@ zap_update(objset_t *os, uint64_t zapobj, const char *name,
 			err = fzap_update(zn, integer_size, num_integers,
 			    val, tx);
 		zap = zn->zn_zap;	/* fzap_update() may change zap */
-	} else {
-		mze = mze_find(zn);
+	} else if (zap->zap_ismicro) {
+		mzap_ent_t *mze = mze_find(zn);
 		if (mze != NULL) {
 			ASSERT3U(MZE_PHYS(zap, mze)->mze_value, ==, oldval);
 			MZE_PHYS(zap, mze)->mze_value = *intval;
 		} else {
 			mzap_addent(zn, *intval);
+		}
+	} else {
+		tzap_ent_t *tze = tze_find(zn);
+		if (tze != NULL) {
+			int j;
+			for (j = 0; j < num_integers; j++)
+				TZE_PHYS(zap, tze)->tze_value[j] =
+				    *(intval + j);
+		} else {
+			tzap_addent(zn, num_integers, val);
 		}
 	}
 	ASSERT(zap == zn->zn_zap);
@@ -1135,6 +1316,7 @@ zap_remove_norm(objset_t *os, uint64_t zapobj, const char *name,
 	zap_t *zap;
 	int err;
 	mzap_ent_t *mze;
+	tzap_ent_t *tze;
 	zap_name_t *zn;
 
 	err = zap_lockdir(os, zapobj, tx, RW_WRITER, TRUE, FALSE, &zap);
@@ -1145,9 +1327,9 @@ zap_remove_norm(objset_t *os, uint64_t zapobj, const char *name,
 		zap_unlockdir(zap);
 		return (SET_ERROR(ENOTSUP));
 	}
-	if (!zap->zap_ismicro) {
+	if (!zap->zap_ismicro && !zap->zap_istiny) {
 		err = fzap_remove(zn, tx);
-	} else {
+	} else if (zap->zap_ismicro) {
 		mze = mze_find(zn);
 		if (mze == NULL) {
 			err = SET_ERROR(ENOENT);
@@ -1156,6 +1338,16 @@ zap_remove_norm(objset_t *os, uint64_t zapobj, const char *name,
 			bzero(&zap_m_phys(zap)->mz_chunk[mze->mze_chunkid],
 			    sizeof (mzap_ent_phys_t));
 			mze_remove(zap, mze);
+		}
+	} else if (zap->zap_istiny) {
+		tze = tze_find(zn);
+		if (tze == NULL) {
+			err = SET_ERROR(ENOENT);
+		} else {
+			zap->zap_m.zap_num_entries--;
+			bzero(&zap_t_phys(zap)->tz_chunk[tze->tze_chunkid],
+			    sizeof (tzap_ent_phys_t));
+			tze_remove(zap, tze);
 		}
 	}
 	zap_name_free(zn);
@@ -1251,8 +1443,6 @@ zap_cursor_retrieve(zap_cursor_t *zc, zap_attribute_t *za)
 {
 	int err;
 	avl_index_t idx;
-	mzap_ent_t mze_tofind;
-	mzap_ent_t *mze;
 
 	if (zc->zc_hash == -1ULL)
 		return (SET_ERROR(ENOENT));
@@ -1278,9 +1468,12 @@ zap_cursor_retrieve(zap_cursor_t *zc, zap_attribute_t *za)
 	} else {
 		rw_enter(&zc->zc_zap->zap_rwlock, RW_READER);
 	}
-	if (!zc->zc_zap->zap_ismicro) {
+	if (!zc->zc_zap->zap_ismicro && !zc->zc_zap->zap_istiny) {
 		err = fzap_cursor_retrieve(zc->zc_zap, zc, za);
-	} else {
+	} else if (zc->zc_zap->zap_ismicro) {
+		mzap_ent_t mze_tofind;
+		mzap_ent_t *mze;
+
 		mze_tofind.mze_hash = zc->zc_hash;
 		mze_tofind.mze_cd = zc->zc_cd;
 
@@ -1300,6 +1493,34 @@ zap_cursor_retrieve(zap_cursor_t *zc, zap_attribute_t *za)
 			(void) strcpy(za->za_name, mzep->mze_name);
 			zc->zc_hash = mze->mze_hash;
 			zc->zc_cd = mze->mze_cd;
+			err = 0;
+		} else {
+			zc->zc_hash = -1ULL;
+			err = SET_ERROR(ENOENT);
+		}
+	} else {
+		tzap_ent_t tze_tofind;
+		tzap_ent_t *tze;
+
+		tze_tofind.tze_hash = zc->zc_hash;
+		tze_tofind.tze_cd = zc->zc_cd;
+
+		tze = avl_find(&zc->zc_zap->zap_m.zap_avl, &tze_tofind, &idx);
+		if (tze == NULL) {
+			tze = avl_nearest(&zc->zc_zap->zap_m.zap_avl,
+			    idx, AVL_AFTER);
+		}
+		if (tze) {
+			tzap_ent_phys_t *tzep = TZE_PHYS(zc->zc_zap, tze);
+			ASSERT3U(tze->tze_cd, ==, tzep->tze_cd);
+			za->za_normalization_conflict =
+			    tzap_normalization_conflict(zc->zc_zap, NULL, tze);
+			za->za_integer_length = 8;
+			za->za_num_integers = tzep->tze_num_ints;
+			za->za_first_integer = tzep->tze_value[0];
+			(void) strcpy(za->za_name, tzep->tze_name);
+			zc->zc_hash = tze->tze_hash;
+			zc->zc_cd = tze->tze_cd;
 			err = 0;
 		} else {
 			zc->zc_hash = -1ULL;
@@ -1330,8 +1551,9 @@ zap_get_stats(objset_t *os, uint64_t zapobj, zap_stats_t *zs)
 
 	bzero(zs, sizeof (zap_stats_t));
 
-	if (zap->zap_ismicro) {
+	if (zap->zap_ismicro || zap->zap_istiny) {
 		zs->zs_blocksize = zap->zap_dbuf->db_size;
+		zs->zs_block_type = zap->zap_ismicro ? ZBT_MICRO : ZBT_TINY;
 		zs->zs_num_entries = zap->zap_m.zap_num_entries;
 		zs->zs_num_blocks = 1;
 	} else {
@@ -1374,7 +1596,7 @@ zap_count_write(objset_t *os, uint64_t zapobj, const char *name, int add,
 	if (err)
 		return (err);
 
-	if (!zap->zap_ismicro) {
+	if (!zap->zap_ismicro && !zap->zap_istiny) {
 		zap_name_t *zn = zap_name_alloc(zap, name, MT_EXACT);
 		if (zn) {
 			err = fzap_count_write(zn, add, towrite,
@@ -1402,13 +1624,16 @@ zap_count_write(objset_t *os, uint64_t zapobj, const char *name, int add,
 		 * 4 new blocks written : 2 new split leaf, 2 grown
 		 *			ptrtbl blocks
 		 */
+		uint64_t maxblksz = zap->zap_ismicro ?
+		    MZAP_MAX_BLKSZ : TZAP_MAX_BLKSZ;
+
 		if (dmu_buf_freeable(zap->zap_dbuf))
-			*tooverwrite += MZAP_MAX_BLKSZ;
+			*tooverwrite += maxblksz;
 		else
-			*towrite += MZAP_MAX_BLKSZ;
+			*towrite += maxblksz;
 
 		if (add) {
-			*towrite += 4 * MZAP_MAX_BLKSZ;
+			*towrite += 4 * maxblksz;
 		}
 	}
 

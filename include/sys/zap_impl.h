@@ -72,6 +72,43 @@ typedef struct mzap_ent {
 #define	MZE_PHYS(zap, mze) \
 	(&zap_m_phys(zap)->mz_chunk[(mze)->mze_chunkid])
 
+#define	TZE_PHYS(zap, tze) \
+	(&zap_t_phys(zap)->tz_chunk[(tze)->tze_chunkid])
+
+#define	TZAP_ENT_LEN		128
+#define	TZAP_MAX_INTS		8
+#define	TZAP_NAME_LEN		\
+    (TZAP_ENT_LEN - TZAP_MAX_INTS * 8 - 4 - 2)
+#define	TZAP_MAX_BLKSZ		SPA_OLD_MAXBLOCKSIZE
+
+typedef struct tzap_ent_phys {
+	uint64_t tze_value[TZAP_MAX_INTS];
+	uint32_t tze_cd;
+	uint16_t tze_num_ints;
+	char tze_name[TZAP_NAME_LEN];
+} tzap_ent_phys_t;
+
+typedef struct tzap_phys {
+	uint64_t tz_block_type;	/* ZBT_TINY */
+	uint64_t tz_salt;
+	uint64_t tz_normflags;
+	uint64_t tz_flags;	/* zap_flags_t */
+	uint64_t tz_pad[4];
+	tzap_ent_phys_t tz_chunk[1];
+	/* actually variable size depending on block size */
+} tzap_phys_t;
+
+typedef struct tzap_ent {
+	avl_node_t tze_node;
+	int tze_chunkid;
+	int tze_num_ints;
+	uint64_t tze_hash;
+	uint32_t tze_cd; /* copy from mze_phys->mze_cd */
+} tzap_ent_t;
+
+#define	TZE_PHYS(zap, tze) \
+	(&zap_t_phys(zap)->tz_chunk[(tze)->tze_chunkid])
+
 /*
  * The (fat) zap is stored in one object. It is an array of
  * 1<<FZAP_BLOCK_SHIFT byte blocks. The layout looks like one of:
@@ -90,6 +127,7 @@ struct zap_leaf;
 #define	ZBT_LEAF		((1ULL << 63) + 0)
 #define	ZBT_HEADER		((1ULL << 63) + 1)
 #define	ZBT_MICRO		((1ULL << 63) + 3)
+#define	ZBT_TINY		((1ULL << 63) + 4)
 /* any other values are ptrtbl blocks */
 
 /*
@@ -146,6 +184,7 @@ typedef struct zap {
 	struct dmu_buf *zap_dbuf;
 	krwlock_t zap_rwlock;
 	boolean_t zap_ismicro;
+	boolean_t zap_istiny;
 	int zap_normflags;
 	uint64_t zap_salt;
 	union {
@@ -178,6 +217,12 @@ zap_m_phys(zap_t *zap)
 	return (zap->zap_dbuf->db_data);
 }
 
+static inline tzap_phys_t *
+zap_t_phys(zap_t *zap)
+{
+	return (zap->zap_dbuf->db_data);
+}
+
 typedef struct zap_name {
 	zap_t *zn_zap;
 	int zn_key_intlen;
@@ -192,6 +237,7 @@ typedef struct zap_name {
 
 #define	zap_f	zap_u.zap_fat
 #define	zap_m	zap_u.zap_micro
+#define	zap_y	zap_u.zap_micro
 
 boolean_t zap_match(zap_name_t *zn, const char *matchname);
 int zap_lockdir(objset_t *os, uint64_t obj, dmu_tx_t *tx,
@@ -229,6 +275,17 @@ int fzap_add_cd(zap_name_t *zn,
     uint64_t integer_size, uint64_t num_integers,
     const void *val, uint32_t cd, dmu_tx_t *tx);
 void fzap_upgrade(zap_t *zap, dmu_tx_t *tx, zap_flags_t flags);
+
+int tze_compare(const void *arg1, const void *arg2);
+void tze_insert(zap_t *zap, int chunkid, uint64_t hash);
+tzap_ent_t *tze_find(zap_name_t *zn);
+uint32_t tze_find_unused_cd(zap_t *zap, uint64_t hash);
+void tze_remove(zap_t *zap, tzap_ent_t *tze);
+void tze_destroy(zap_t *zap);
+int tzap_upgrade(zap_t **zapp, dmu_tx_t *tx, zap_flags_t flags);
+void tzap_addent(zap_name_t *zn, uint64_t num_integers, const void *val);
+boolean_t tzap_normalization_conflict(zap_t *zap, zap_name_t *zn,
+    tzap_ent_t *tze);
 
 #ifdef	__cplusplus
 }

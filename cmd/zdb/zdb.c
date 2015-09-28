@@ -35,6 +35,7 @@
 #include <sys/spa_impl.h>
 #include <sys/dmu.h>
 #include <sys/zap.h>
+#include <sys/zap_impl.h>
 #include <sys/fs/zfs.h>
 #include <sys/zfs_znode.h>
 #include <sys/zfs_sa.h>
@@ -292,7 +293,8 @@ dump_zap_stats(objset_t *os, uint64_t object)
 
 	if (zs.zs_ptrtbl_len == 0) {
 		ASSERT(zs.zs_num_blocks == 1);
-		(void) printf("\tmicrozap: %llu bytes, %llu entries\n",
+		(void) printf("\t%szap: %llu bytes, %llu entries\n",
+		    zs.zs_block_type == ZBT_MICRO ? "micro" : "tiny",
 		    (u_longlong_t)zs.zs_blocksize,
 		    (u_longlong_t)zs.zs_num_entries);
 		return;
@@ -572,6 +574,7 @@ dump_zpldir(objset_t *os, uint64_t object, void *data, size_t size)
 {
 	zap_cursor_t zc;
 	zap_attribute_t attr;
+	uint64_t value[TZAP_MAX_INTS];
 	const char *typenames[] = {
 		/* 0 */ "not specified",
 		/* 1 */ "FIFO",
@@ -597,8 +600,18 @@ dump_zpldir(objset_t *os, uint64_t object, void *data, size_t size)
 	for (zap_cursor_init(&zc, os, object);
 	    zap_cursor_retrieve(&zc, &attr) == 0;
 	    zap_cursor_advance(&zc)) {
-		(void) printf("\t\t%s = %lld (type: %s)\n",
-		    attr.za_name, ZFS_DIRENT_OBJ(attr.za_first_integer),
+		int i;
+		ASSERT3U(attr.za_num_integers, <=, TZAP_MAX_INTS);
+		zap_lookup(os, object, attr.za_name, attr.za_integer_length,
+		    attr.za_num_integers, value);
+		(void) printf("\t\t%s = %lld %s", attr.za_name,
+		    ZFS_DIRENT_OBJ(attr.za_first_integer),
+		    attr.za_num_integers > 1 ? "[" : "");
+		for (i=1; i < attr.za_num_integers; i++)
+			(void) printf("0x%llx%s", (long long unsigned)value[i],
+			    i < attr.za_num_integers - 1 ? ", " : "");
+		(void) printf("%s(type: %s)\n",
+		    attr.za_num_integers > 1 ? "] " : "",
 		    typenames[ZFS_DIRENT_TYPE(attr.za_first_integer)]);
 	}
 	zap_cursor_fini(&zc);

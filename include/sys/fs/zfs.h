@@ -155,6 +155,7 @@ typedef enum {
 	ZFS_PROP_RELATIME,
 	ZFS_PROP_REDUNDANT_METADATA,
 	ZFS_PROP_OVERLAY,
+	ZFS_PROP_ZAP_DEFAULT,
 	ZFS_NUM_PROPS
 } zfs_prop_t;
 
@@ -358,6 +359,12 @@ typedef enum {
 	ZFS_XATTR_DIR = 1,
 	ZFS_XATTR_SA = 2
 } zfs_xattr_type_t;
+
+typedef enum {
+	ZFS_ZAP_MICRO = 0,
+	ZFS_ZAP_TINY = 1,
+	ZFS_ZAP_FAT = 2
+} zfs_zap_type_t;
 
 typedef enum {
 	ZFS_REDUNDANT_METADATA_ALL,

@@ -93,6 +93,7 @@ KERNEL_C = \
 	zap.c \
 	zap_leaf.c \
 	zap_micro.c \
+	zap_tiny.c \
 	zfeature.c \
 	zfeature_common.c \
 	zfs_byteswap.c \
