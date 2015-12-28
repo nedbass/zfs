@@ -590,6 +590,9 @@ zfs_mknode(znode_t *dzp, vattr_t *vap, dmu_tx_t *tx, cred_t *cr,
 	if (dnodesize == 0)
 		dnodesize = DNODE_MIN_SIZE;
 
+	if (flag & IS_ROOT_NODE)
+		dnodesize = DNODE_MAX_SIZE;
+
 	obj_type = zsb->z_use_sa ? DMU_OT_SA : DMU_OT_ZNODE;
 
 	bonuslen = (obj_type == DMU_OT_SA) ?
@@ -1647,8 +1650,8 @@ zfs_create_fs(objset_t *os, cred_t *cr, nvlist_t *zplprops, dmu_tx_t *tx)
 	 * there can be no i/o errors (which we assert below).
 	 */
 	moid = MASTER_NODE_OBJ;
-	error = zap_create_claim(os, moid, DMU_OT_MASTER_NODE,
-	    DMU_OT_NONE, 0, tx);
+	error = zap_create_claim_dnsize(os, moid, DMU_OT_MASTER_NODE,
+	    DMU_OT_NONE, 0, 31 * DNODE_MIN_SIZE, tx);
 	ASSERT(error == 0);
 
 	/*

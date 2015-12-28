@@ -513,7 +513,7 @@ dnode_destroy(dnode_t *dn)
 		dn->dn_dirtyctx_firstset = NULL;
 	}
 	if (dn->dn_bonus != NULL) {
-		mutex_enter(&dn->dn_bonus->db_mtx);
+		take_dbuf_lock(dn->dn_bonus);
 		dbuf_evict(dn->dn_bonus);
 		dn->dn_bonus = NULL;
 	}
@@ -544,8 +544,6 @@ dnode_allocate(dnode_t *dn, dmu_object_type_t ot, int blocksize, int ibs,
 	int i;
 
 	ASSERT3U(dn_slots, >, 0);
-	ASSERT3U(dn_slots << DNODE_SHIFT, <=,
-	    spa_maxdnodesize(dmu_objset_spa(dn->dn_objset)));
 	ASSERT3U(blocksize, <=,
 	    spa_maxblocksize(dmu_objset_spa(dn->dn_objset)));
 	if (blocksize == 0)
