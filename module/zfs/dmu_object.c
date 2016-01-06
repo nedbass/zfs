@@ -51,9 +51,9 @@ dmu_object_alloc_dnsize(objset_t *os, dmu_object_type_t ot, int blocksize,
 	int dn_slots = dnodesize >> DNODE_SHIFT;
 
 	if (bonuslen > 0 && dn_slots > 0) {
-		ASSERT((bonustype != DMU_OT_PLAIN_FILE_CONTENTS) ||
+		ASSERT((bonustype != DMU_OT_SA) ||
 		    (bonuslen == DN_SLOTS_TO_BONUSLEN(dn_slots)));
-	} else {
+	} else if (dn_slots == 0) {
 		dn_slots = DNODE_MIN_SLOTS;
 	}
 	ASSERT3S(dn_slots, >=, DNODE_MIN_SLOTS);

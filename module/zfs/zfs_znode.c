@@ -1695,8 +1695,8 @@ zfs_create_fs(objset_t *os, cred_t *cr, nvlist_t *zplprops, dmu_tx_t *tx)
 	 */
 
 	if (version >= ZPL_VERSION_SA) {
-		sa_obj = zap_create(os, DMU_OT_SA_MASTER_NODE,
-		    DMU_OT_NONE, 0, tx);
+		sa_obj = zap_create_dnsize(os, DMU_OT_SA_MASTER_NODE,
+		    DMU_OT_NONE, 0, DNODE_MAX_SIZE, tx);
 		error = zap_add(os, moid, ZFS_SA_ATTRS, 8, 1, &sa_obj, tx);
 		ASSERT(error == 0);
 	} else {
@@ -1705,7 +1705,8 @@ zfs_create_fs(objset_t *os, cred_t *cr, nvlist_t *zplprops, dmu_tx_t *tx)
 	/*
 	 * Create a delete queue.
 	 */
-	obj = zap_create(os, DMU_OT_UNLINKED_SET, DMU_OT_NONE, 0, tx);
+	obj = zap_create_dnsize(os, DMU_OT_UNLINKED_SET, DMU_OT_NONE, 0,
+	    DNODE_MAX_SIZE, tx);
 
 	error = zap_add(os, moid, ZFS_UNLINKED_SET, 8, 1, &obj, tx);
 	ASSERT(error == 0);
