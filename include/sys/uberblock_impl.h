@@ -54,6 +54,8 @@ struct uberblock {
 
 	/* highest SPA_VERSION supported by software that wrote this txg */
 	uint64_t	ub_software_version;
+	mmp_phys_t	ub_mmp;		/* Multi-Modifier Protection	*/
+
 };
 
 #ifdef	__cplusplus

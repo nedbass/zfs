@@ -928,6 +928,11 @@ extern boolean_t spa_debug_enabled(spa_t *spa);
 
 extern int spa_mode_global;			/* mode, e.g. FREAD | FWRITE */
 
+/* mmp sequence counter */
+extern void spa_mmp_seq_bump(spa_t *spa);
+extern void spa_mmp_init(spa_t *spa);
+
+
 #ifdef	__cplusplus
 }
 #endif

@@ -2102,6 +2102,15 @@ dump_uberblock(uberblock_t *ub, const char *header, const char *footer)
 	(void) printf("\tguid_sum = %llu\n", (u_longlong_t)ub->ub_guid_sum);
 	(void) printf("\ttimestamp = %llu UTC = %s",
 	    (u_longlong_t)ub->ub_timestamp, asctime(localtime(&timestamp)));
+	(void) printf("\tmmp_magic = %016llx\n", (u_longlong_t)ub->ub_mmp.mmp_magic);
+	(void) printf("\tmmp_pool_guid = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_pool_guid);
+	(void) printf("\tmmp_open_id = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_open_id);
+	(void) printf("\tmmp_seq = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_seq);
+	(void) printf("\tmmp_interval = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_interval);
+	(void) printf("\tmmp_delay = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_delay);
+	(void) printf("\tmmp_nodename = %s\n", ub->ub_mmp.mmp_nodename);
+	(void) printf("\tmmp_op = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_op);
+	(void) printf("\tmmp_first_txg = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_first_txg);
 	if (dump_opt['u'] >= 3) {
 		char blkbuf[BP_SPRINTF_LEN];
 		snprintf_blkptr(blkbuf, sizeof (blkbuf), &ub->ub_rootbp);

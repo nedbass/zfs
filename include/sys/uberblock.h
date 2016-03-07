@@ -32,6 +32,7 @@
 #include <sys/spa.h>
 #include <sys/vdev.h>
 #include <sys/zio.h>
+#include <sys/mmp.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -41,6 +42,7 @@ typedef struct uberblock uberblock_t;
 
 extern int uberblock_verify(uberblock_t *);
 extern boolean_t uberblock_update(uberblock_t *, vdev_t *, uint64_t);
+extern void uberblock_mmp_update(uberblock_t *ub, const mmp_phys_t *mmp, mmp_op_t op);
 
 #ifdef	__cplusplus
 }

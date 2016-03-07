@@ -40,6 +40,16 @@ uberblock_verify(uberblock_t *ub)
 }
 
 /*
+ * Update the mmp part of the uberblock
+ */
+void
+uberblock_mmp_update(uberblock_t *ub, const mmp_phys_t *mmp, mmp_op_t op)
+{
+	memcpy(&ub->ub_mmp, mmp, sizeof(*mmp));
+	ub->ub_mmp.mmp_op = op;
+}
+
+/*
  * Update the uberblock and return TRUE if anything changed in this
  * transaction group.
  */

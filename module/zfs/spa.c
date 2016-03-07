@@ -2968,6 +2968,22 @@ spa_load_best(spa_t *spa, spa_load_state_t state, int mosconfig,
 	}
 }
 
+void
+spa_mmp_init(spa_t *spa)
+{
+	memset(&spa->spa_mmp, 0, sizeof(spa->spa_mmp));
+
+	spa->spa_mmp.mmp_magic = MMP_MAGIC;
+	spa->spa_mmp.mmp_open_id = spa_get_random(-1ULL);
+	spa->spa_mmp.mmp_interval = 5000;
+	spa->spa_mmp.mmp_first_txg = 50;
+	/*
+	 * Seems to me like utsname()->nodename might become invalid before strncpy
+	 * begins its work, but I see no _get() or equivalent to prevent that.
+	 */
+	strncpy(spa->spa_mmp.mmp_nodename, utsname()->nodename, sizeof(spa->spa_mmp.mmp_nodename));
+}
+
 /*
  * Pool Open/Import
  *
@@ -3087,6 +3103,8 @@ spa_open_common(const char *pool, spa_t **spapp, void *tag, nvlist_t *nvpolicy,
 		spa->spa_load_txg = 0;
 		mutex_exit(&spa_namespace_lock);
 	}
+
+	spa_mmp_init(spa);
 
 #ifdef _KERNEL
 	if (firstopen)
@@ -3644,6 +3662,8 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 	spa->spa_uberblock.ub_txg = txg - 1;
 	spa->spa_uberblock.ub_version = version;
 	spa->spa_ubsync = spa->spa_uberblock;
+
+	spa_mmp_init(spa);
 
 	/*
 	 * Create "The Godfather" zio to hold all async IOs
@@ -6487,6 +6507,9 @@ spa_sync(spa_t *spa, uint64_t txg)
 
 	} while (dmu_objset_is_dirty(mos, txg));
 
+	/* bump mmp_seq so it advances with every txg sync */
+	spa_mmp_seq_bump(spa);
+
 	/*
 	 * Rewrite the vdev configuration (which includes the uberblock)
 	 * to commit the transaction group.
@@ -6751,6 +6774,14 @@ spa_event_notify(spa_t *spa, vdev_t *vd, const char *name)
 #ifdef _KERNEL
 	zfs_ereport_post(name, spa, vd, NULL, 0, 0);
 #endif
+}
+
+void
+spa_mmp_seq_bump(spa_t *spa)
+{
+	mutex_enter(&spa->spa_mmp_lock);
+	spa->spa_mmp.mmp_seq++;
+	mutex_exit(&spa->spa_mmp_lock);
 }
 
 #if defined(_KERNEL) && defined(HAVE_SPL)

@@ -1228,6 +1228,8 @@ retry:
 
 	ASSERT(txg <= spa->spa_final_txg);
 
+	uberblock_mmp_update(ub, &spa->spa_mmp, MO_TXG_SYNC);
+
 	/*
 	 * Flush the write cache of every disk that's been written to
 	 * in this transaction group.  This ensures that all blocks

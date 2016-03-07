@@ -253,6 +253,8 @@ struct spa {
 	uint64_t	spa_errata;		/* errata issues detected */
 	spa_stats_t	spa_stats;		/* assorted spa statistics */
 	hrtime_t	spa_ccw_fail_time;	/* Conf cache write fail time */
+	kmutex_t	spa_mmp_lock;		/* protects spa_mmp */
+	mmp_phys_t	spa_mmp;		/* MMP info for syncs */
 
 	/*
 	 * spa_refcount & spa_config_lock must be the last elements
