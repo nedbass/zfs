@@ -148,6 +148,7 @@ extern uint64_t vdev_label_offset(uint64_t psize, int l, uint64_t offset);
 extern int vdev_label_number(uint64_t psise, uint64_t offset);
 extern nvlist_t *vdev_label_read_config(vdev_t *vd, uint64_t txg);
 extern void vdev_uberblock_load(vdev_t *, struct uberblock *, nvlist_t **);
+int vdev_mmpblock_foreign_id(vdev_t *rvd);
 
 typedef enum {
 	VDEV_LABEL_CREATE,	/* create/add a new device */

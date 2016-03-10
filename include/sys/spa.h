@@ -932,6 +932,7 @@ extern int spa_mode_global;			/* mode, e.g. FREAD | FWRITE */
 extern void spa_mmp_seq_bump(spa_t *spa);
 extern void spa_mmp_init(spa_t *spa);
 
+int spa_mmp_detect_foreign_import(spa_t *spa);
 
 #ifdef	__cplusplus
 }

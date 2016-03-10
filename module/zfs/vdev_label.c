@@ -913,6 +913,32 @@ vdev_uberblock_load_done(zio_t *zio)
 }
 
 static void
+vdev_mmpblock_load_done(zio_t *zio)
+{
+	vdev_t *vd = zio->io_vd;
+	spa_t *spa = zio->io_spa;
+	zio_t *rio = zio->io_private;
+	uberblock_t *ub = zio->io_data;
+	boolean_t *mmp_fault = (boolean_t *)rio->io_private;
+	mmp_phys_t *spa_mmp = &spa->spa_mmp;
+	mmp_phys_t *ub_mmp = &ub->ub_mmp;
+
+	ASSERT3U(zio->io_size, ==, VDEV_UBERBLOCK_SIZE(vd));
+
+	ASSERT3U(spa_mmp->mmp_magic, ==, MMP_MAGIC);
+
+	if (zio->io_error == 0 && uberblock_verify(ub) == 0) {
+		mutex_enter(&rio->io_lock);
+		if (spa_mmp->mmp_open_id != ub_mmp->mmp_open_id)
+			*mmp_fault= B_TRUE;
+		mutex_exit(&rio->io_lock);
+	}
+
+	zio_buf_free(zio->io_data, zio->io_size);
+}
+
+
+static void
 vdev_uberblock_load_impl(zio_t *zio, vdev_t *vd, int flags,
     struct ubl_cbdata *cbp)
 {
@@ -932,6 +958,49 @@ vdev_uberblock_load_impl(zio_t *zio, vdev_t *vd, int flags,
 			}
 		}
 	}
+}
+
+static void
+vdev_mmpblock_foreign_id_impl(zio_t *zio, vdev_t *vd, int flags)
+{
+	int c, l, n;
+
+	for (c = 0; c < vd->vdev_children; c++)
+		vdev_mmpblock_foreign_id_impl(zio, vd->vdev_child[c], flags);
+
+	if (vd->vdev_ops->vdev_op_leaf && vdev_readable(vd)) {
+		for (l = 0; l < VDEV_LABELS; l++) {
+			for (n = 0; n < VDEV_UBERBLOCK_COUNT(vd); n++) {
+				vdev_label_read(zio, vd, l,
+				    zio_buf_alloc(VDEV_UBERBLOCK_SIZE(vd)),
+				    VDEV_UBERBLOCK_OFFSET(vd, n),
+				    VDEV_UBERBLOCK_SIZE(vd),
+				    vdev_mmpblock_load_done, zio, flags);
+			}
+		}
+	}
+}
+
+int
+vdev_mmpblock_foreign_id(vdev_t *rvd)
+{
+	zio_t *zio;
+	spa_t *spa = rvd->vdev_spa;
+	boolean_t mmp_fault = B_FALSE;
+	int flags = ZIO_FLAG_CONFIG_WRITER | ZIO_FLAG_CANFAIL |
+	    ZIO_FLAG_SPECULATIVE | ZIO_FLAG_TRYHARD;
+
+	spa_config_enter(spa, SCL_ALL, FTAG, RW_WRITER);
+	zio = zio_root(spa, NULL, &mmp_fault, flags);
+	vdev_mmpblock_foreign_id_impl(zio, rvd, flags);
+	(void) zio_wait(zio);
+
+	spa_config_exit(spa, SCL_ALL, FTAG);
+
+	if (mmp_fault)
+		return (SET_ERROR(EBUSY)); /* XXX choose a good error */
+
+	return 0;
 }
 
 /*

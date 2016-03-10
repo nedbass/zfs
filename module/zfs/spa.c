@@ -6380,6 +6380,14 @@ spa_sync(spa_t *spa, uint64_t txg)
 
 	VERIFY(spa_writeable(spa));
 
+
+	if (spa_mmp_detect_foreign_import(spa) != 0)
+		dprintf("MMP fault detected");
+
+	/*
+	 * Check for another active import.
+	 */
+
 	/*
 	 * Lock out configuration changes.
 	 */
@@ -6782,6 +6790,12 @@ spa_mmp_seq_bump(spa_t *spa)
 	mutex_enter(&spa->spa_mmp_lock);
 	spa->spa_mmp.mmp_seq++;
 	mutex_exit(&spa->spa_mmp_lock);
+}
+
+int
+spa_mmp_detect_foreign_import(spa_t *spa)
+{
+	return (vdev_mmpblock_foreign_id(spa->spa_root_vdev));
 }
 
 #if defined(_KERNEL) && defined(HAVE_SPL)
