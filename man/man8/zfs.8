@@ -910,6 +910,40 @@ The values \fBon\fR and \fBoff\fR are equivalent to the \fBdev\fR and \fBnodev\f
 .sp
 .ne 2
 .na
+\fB\fBdnodesize\fR=\fIsize\fR\fR
+.ad
+.sp .6
+.RS 4n
+Specifies a suggested size for dnodes in the file system. Setting this
+property to a value larger than 512 requires the \fBlarge_dnode\fR pool
+feature to be enabled.  The size specified must be a multiple of 512
+greater than or equal to 512 and less than or equal to 16 Kbytes. The
+default value is 512.  Changing the file system's \fBdnodesize\fR
+affects only files created afterward; existing files are unaffected.
+.sp
+Increasing the default dnode size may have a performance benefit on
+filesystems where a smaller dnode size would result in the use of spill
+blocks. Consider increasing the \fBdnodesize\fR if the dataset in
+question uses the \fBxattr=sa\fR property setting and spill blocks would
+otherwise be needed to store the extended attribute data. This is
+applicable to SELinux-enabled systems and Lustre servers, for example.
+.sp
+To determine whether a file uses a spill block given its dataset name
+and inode number, use '\fBzdb -dddd <dataset> <inode>\fR' to inspect the
+dnode flags. If the flag SPILL_BLKPTR appears then a spill block is in
+use and the dataset may be a good candidate for larger dnodes.  The
+above \fBzdb\fR command will also indicate the number of bytes used by
+SA xattrs, and this information can be used to select an appropriate
+value for the new dnode size.
+.sp
+This property can also be referred to by its shortened column name,
+\fBdnsize\fR.
+.RE
+
+.sp
+.ne 2
+.mk
+.na
 \fB\fBexec\fR=\fBon\fR | \fBoff\fR\fR
 .ad
 .sp .6
