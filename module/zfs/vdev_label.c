@@ -919,7 +919,7 @@ vdev_mmpblock_load_done(zio_t *zio)
 	spa_t *spa = zio->io_spa;
 	zio_t *rio = zio->io_private;
 	uberblock_t *ub = zio->io_data;
-	boolean_t *mmp_fault = (boolean_t *)rio->io_private;
+	mmp_phys_t *mmp_from_disk = (mmp_phys_t *)rio->io_private;
 	mmp_phys_t *spa_mmp = &spa->spa_mmp;
 	mmp_phys_t *ub_mmp = &ub->ub_mmp;
 
@@ -930,7 +930,7 @@ vdev_mmpblock_load_done(zio_t *zio)
 	if (zio->io_error == 0 && uberblock_verify(ub) == 0) {
 		mutex_enter(&rio->io_lock);
 		if (spa_mmp->mmp_open_id != ub_mmp->mmp_open_id)
-			*mmp_fault= B_TRUE;
+			*mmp_from_disk=*ub_mmp;
 		mutex_exit(&rio->io_lock);
 	}
 
@@ -986,19 +986,30 @@ vdev_mmpblock_foreign_id(vdev_t *rvd)
 {
 	zio_t *zio;
 	spa_t *spa = rvd->vdev_spa;
-	boolean_t mmp_fault = B_FALSE;
+	mmp_phys_t mmp_from_disk = spa->spa_mmp;
 	int flags = ZIO_FLAG_CONFIG_WRITER | ZIO_FLAG_CANFAIL |
 	    ZIO_FLAG_SPECULATIVE | ZIO_FLAG_TRYHARD;
 
 	spa_config_enter(spa, SCL_ALL, FTAG, RW_WRITER);
-	zio = zio_root(spa, NULL, &mmp_fault, flags);
+	zio = zio_root(spa, NULL, &mmp_from_disk, flags);
 	vdev_mmpblock_foreign_id_impl(zio, rvd, flags);
 	(void) zio_wait(zio);
 
 	spa_config_exit(spa, SCL_ALL, FTAG);
 
-	if (mmp_fault)
+	if (mmp_from_disk.mmp_open_id != spa->spa_mmp.mmp_open_id) {
+		dprintf("Foreign ID found in MMP block:\n"
+			"me: open_id=%d\n"
+			"foreign: magic=%x\n"
+			"open_id=%d\n"
+			"seq=%d\n"
+			"op=%d\n"
+			"nodename=%s\n", spa->spa_mmp.mmp_open_id,
+			mmp_from_disk.mmp_magic, mmp_from_disk.mmp_open_id,
+			mmp_from_disk.mmp_seq, mmp_from_disk.mmp_op,
+			mmp_from_disk.mmp_nodename);
 		return (SET_ERROR(EBUSY)); /* XXX choose a good error */
+		}
 
 	return 0;
 }
