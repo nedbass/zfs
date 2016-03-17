@@ -30,15 +30,32 @@
 #include <sys/dnode.h>
 #include <sys/zap.h>
 #include <sys/zfeature.h>
+#include <sys/dsl_dataset.h>
 
 uint64_t
 dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
     dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
 {
+	return dmu_object_alloc_dnsize(os, ot, blocksize, bonustype, bonuslen,
+	    0, tx);
+}
+
+uint64_t
+dmu_object_alloc_dnsize(objset_t *os, dmu_object_type_t ot, int blocksize,
+    dmu_object_type_t bonustype, int bonuslen, int dnodesize, dmu_tx_t *tx)
+{
 	uint64_t object;
 	uint64_t L1_dnode_count = DNODES_PER_BLOCK <<
 	    (DMU_META_DNODE(os)->dn_indblkshift - SPA_BLKPTRSHIFT);
 	dnode_t *dn = NULL;
+	int dn_slots = dnodesize >> DNODE_SHIFT;
+
+	if (dn_slots == 0) {
+		dn_slots = DNODE_MIN_SLOTS;
+	} else {
+		ASSERT3S(dn_slots, >=, DNODE_MIN_SLOTS);
+		ASSERT3S(dn_slots, <=, DNODE_MAX_SLOTS);
+	}
 
 	mutex_enter(&os->os_obj_lock);
 	for (;;) {
@@ -75,7 +92,7 @@ dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
 			if (error == 0)
 				object = offset >> DNODE_SHIFT;
 		}
-		os->os_obj_next = ++object;
+		os->os_obj_next = object + dn_slots;
 
 		/*
 		 * XXX We should check for an i/o error here and return
@@ -83,16 +100,18 @@ dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
 		 * dmu_tx_assign(), but there is currently no mechanism
 		 * to do so.
 		 */
-		(void) dnode_hold_impl(os, object, DNODE_MUST_BE_FREE,
+		(void) dnode_hold_impl(os, object, DNODE_MUST_BE_FREE, dn_slots,
 		    FTAG, &dn);
 		if (dn)
 			break;
 
-		if (dmu_object_next(os, &object, B_TRUE, 0) == 0)
-			os->os_obj_next = object - 1;
+		/*
+		 * Skip to next known valid dnode starting point.
+		 */
+		os->os_obj_next = P2ROUNDUP(object + 1, DNODES_PER_BLOCK);
 	}
 
-	dnode_allocate(dn, ot, blocksize, 0, bonustype, bonuslen, tx);
+	dnode_allocate(dn, ot, blocksize, 0, bonustype, bonuslen, dn_slots, tx);
 	dnode_rele(dn, FTAG);
 
 	mutex_exit(&os->os_obj_lock);
@@ -105,16 +124,33 @@ int
 dmu_object_claim(objset_t *os, uint64_t object, dmu_object_type_t ot,
     int blocksize, dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
 {
+	return (dmu_object_claim_dnsize(os, object, ot, blocksize, bonustype,
+	    bonuslen, 0, tx));
+}
+
+int
+dmu_object_claim_dnsize(objset_t *os, uint64_t object, dmu_object_type_t ot,
+    int blocksize, dmu_object_type_t bonustype, int bonuslen,
+    int dnodesize, dmu_tx_t *tx)
+{
 	dnode_t *dn;
+	int dn_slots = dnodesize >> DNODE_SHIFT;
 	int err;
+
+	if (dn_slots == 0)
+		dn_slots = DNODE_MIN_SLOTS;
+	ASSERT3S(dn_slots, >=, DNODE_MIN_SLOTS);
+	ASSERT3S(dn_slots, <=, DNODE_MAX_SLOTS);
 
 	if (object == DMU_META_DNODE_OBJECT && !dmu_tx_private_ok(tx))
 		return (SET_ERROR(EBADF));
 
-	err = dnode_hold_impl(os, object, DNODE_MUST_BE_FREE, FTAG, &dn);
+	err = dnode_hold_impl(os, object, DNODE_MUST_BE_FREE, dn_slots,
+	    FTAG, &dn);
 	if (err)
 		return (err);
-	dnode_allocate(dn, ot, blocksize, 0, bonustype, bonuslen, tx);
+
+	dnode_allocate(dn, ot, blocksize, 0, bonustype, bonuslen, dn_slots, tx);
 	dnode_rele(dn, FTAG);
 
 	dmu_tx_add_new_object(tx, os, object);
@@ -125,22 +161,33 @@ int
 dmu_object_reclaim(objset_t *os, uint64_t object, dmu_object_type_t ot,
     int blocksize, dmu_object_type_t bonustype, int bonuslen, dmu_tx_t *tx)
 {
+	return (dmu_object_reclaim_dnsize(os, object, ot, blocksize, bonustype,
+	    bonuslen, 0, tx));
+}
+
+int
+dmu_object_reclaim_dnsize(objset_t *os, uint64_t object, dmu_object_type_t ot,
+    int blocksize, dmu_object_type_t bonustype, int bonuslen, int dnodesize,
+    dmu_tx_t *tx)
+{
 	dnode_t *dn;
+	int dn_slots = dnodesize >> DNODE_SHIFT;
 	int err;
 
 	if (object == DMU_META_DNODE_OBJECT)
 		return (SET_ERROR(EBADF));
 
-	err = dnode_hold_impl(os, object, DNODE_MUST_BE_ALLOCATED,
+	err = dnode_hold_impl(os, object, DNODE_MUST_BE_ALLOCATED, 0,
 	    FTAG, &dn);
 	if (err)
 		return (err);
 
-	dnode_reallocate(dn, ot, blocksize, bonustype, bonuslen, tx);
+	dnode_reallocate(dn, ot, blocksize, bonustype, bonuslen, dn_slots, tx);
 
 	dnode_rele(dn, FTAG);
 	return (err);
 }
+
 
 int
 dmu_object_free(objset_t *os, uint64_t object, dmu_tx_t *tx)
@@ -150,7 +197,7 @@ dmu_object_free(objset_t *os, uint64_t object, dmu_tx_t *tx)
 
 	ASSERT(object != DMU_META_DNODE_OBJECT || dmu_tx_private_ok(tx));
 
-	err = dnode_hold_impl(os, object, DNODE_MUST_BE_ALLOCATED,
+	err = dnode_hold_impl(os, object, DNODE_MUST_BE_ALLOCATED, 0,
 	    FTAG, &dn);
 	if (err)
 		return (err);
@@ -171,8 +218,18 @@ dmu_object_free(objset_t *os, uint64_t object, dmu_tx_t *tx)
 int
 dmu_object_next(objset_t *os, uint64_t *objectp, boolean_t hole, uint64_t txg)
 {
-	uint64_t offset = (*objectp + 1) << DNODE_SHIFT;
+	uint64_t offset;
+	dmu_object_info_t doi;
 	int error;
+
+	error = dmu_object_info(os, *objectp, &doi);
+
+	if (error && !(error == EINVAL && *objectp == 0))
+		return (SET_ERROR(error));
+	else if (*objectp == 0)
+		offset = 1 << DNODE_SHIFT;
+	else
+		offset = (*objectp << DNODE_SHIFT) + doi.doi_dnodesize;
 
 	error = dnode_next_offset(DMU_META_DNODE(os),
 	    (hole ? DNODE_FIND_HOLE : 0), &offset, 0, DNODES_PER_BLOCK, txg);
@@ -235,8 +292,11 @@ dmu_object_free_zapified(objset_t *mos, uint64_t object, dmu_tx_t *tx)
 
 #if defined(_KERNEL) && defined(HAVE_SPL)
 EXPORT_SYMBOL(dmu_object_alloc);
+EXPORT_SYMBOL(dmu_object_alloc_dnsize);
 EXPORT_SYMBOL(dmu_object_claim);
+EXPORT_SYMBOL(dmu_object_claim_dnsize);
 EXPORT_SYMBOL(dmu_object_reclaim);
+EXPORT_SYMBOL(dmu_object_reclaim_dnsize);
 EXPORT_SYMBOL(dmu_object_free);
 EXPORT_SYMBOL(dmu_object_next);
 EXPORT_SYMBOL(dmu_object_zapify);
