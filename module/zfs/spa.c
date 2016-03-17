@@ -2974,7 +2974,6 @@ spa_mmp_init(spa_t *spa)
 	memset(&spa->spa_mmp, 0, sizeof(spa->spa_mmp));
 
 	spa->spa_mmp.mmp_magic = MMP_MAGIC;
-	spa->spa_mmp.mmp_open_id = spa_get_random(-1ULL);
 	spa->spa_mmp.mmp_interval = 5000;
 	spa->spa_mmp.mmp_first_txg = 50;
 	/*
@@ -2982,6 +2981,12 @@ spa_mmp_init(spa_t *spa)
 	 * begins its work, but I see no _get() or equivalent to prevent that.
 	 */
 	strncpy(spa->spa_mmp.mmp_nodename, utsname()->nodename, sizeof(spa->spa_mmp.mmp_nodename));
+}
+
+void
+spa_mmp_init_open_id(spa_t *spa)
+{
+	spa->spa_mmp.mmp_open_id = spa_get_random(-1ULL);
 }
 
 /*
@@ -3104,7 +3109,7 @@ spa_open_common(const char *pool, spa_t **spapp, void *tag, nvlist_t *nvpolicy,
 		mutex_exit(&spa_namespace_lock);
 	}
 
-	spa_mmp_init(spa);
+	spa_mmp_init_open_id(spa);
 
 #ifdef _KERNEL
 	if (firstopen)
@@ -3662,8 +3667,6 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 	spa->spa_uberblock.ub_txg = txg - 1;
 	spa->spa_uberblock.ub_version = version;
 	spa->spa_ubsync = spa->spa_uberblock;
-
-	spa_mmp_init(spa);
 
 	/*
 	 * Create "The Godfather" zio to hold all async IOs
