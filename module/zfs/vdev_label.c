@@ -970,10 +970,11 @@ vdev_mmpblock_foreign_id_impl(zio_t *zio, vdev_t *vd, int flags)
 
 	if (vd->vdev_ops->vdev_op_leaf && vdev_readable(vd)) {
 		for (l = 0; l < VDEV_LABELS; l++) {
-			for (n = 0; n < VDEV_UBERBLOCK_COUNT(vd); n++) {
+			for (n = 0; n < MMP_BLOCKS_PER_LABEL; n++) {
 				vdev_label_read(zio, vd, l,
 				    zio_buf_alloc(VDEV_UBERBLOCK_SIZE(vd)),
-				    VDEV_UBERBLOCK_OFFSET(vd, n),
+				    VDEV_UBERBLOCK_OFFSET(vd,
+				    VDEV_FIRST_MMP_BLOCK(vd) + n),
 				    VDEV_UBERBLOCK_SIZE(vd),
 				    vdev_mmpblock_load_done, zio, flags);
 			}
@@ -1074,7 +1075,7 @@ static void
 vdev_uberblock_sync(zio_t *zio, uberblock_t *ub, vdev_t *vd, int flags)
 {
 	uberblock_t *ubbuf;
-	int c, l, n;
+	int c, l, n, mmp_block_index;
 
 	for (c = 0; c < vd->vdev_children; c++)
 		vdev_uberblock_sync(zio, ub, vd->vdev_child[c], flags);
@@ -1085,17 +1086,24 @@ vdev_uberblock_sync(zio_t *zio, uberblock_t *ub, vdev_t *vd, int flags)
 	if (!vdev_writeable(vd))
 		return;
 
-	n = ub->ub_txg & (VDEV_UBERBLOCK_COUNT(vd) - 1);
+	n = ub->ub_txg % VDEV_UBERBLOCK_COUNT(vd);
 
 	ubbuf = zio_buf_alloc(VDEV_UBERBLOCK_SIZE(vd));
 	bzero(ubbuf, VDEV_UBERBLOCK_SIZE(vd));
 	*ubbuf = *ub;
 
-	for (l = 0; l < VDEV_LABELS; l++)
+	for (l = 0; l < VDEV_LABELS; l++) {
+		mmp_block_index = VDEV_FIRST_MMP_BLOCK(vd) +
+		    spa_get_random(MMP_BLOCKS_PER_LABEL);
 		vdev_label_write(zio, vd, l, ubbuf,
 		    VDEV_UBERBLOCK_OFFSET(vd, n), VDEV_UBERBLOCK_SIZE(vd),
 		    vdev_uberblock_sync_done, zio->io_private,
 		    flags | ZIO_FLAG_DONT_PROPAGATE);
+		vdev_label_write(zio, vd, l, ubbuf,
+		    VDEV_UBERBLOCK_OFFSET(vd, mmp_block_index),
+		    VDEV_UBERBLOCK_SIZE(vd), vdev_uberblock_sync_done,
+		    zio->io_private, flags | ZIO_FLAG_DONT_PROPAGATE);
+	}
 
 	zio_buf_free(ubbuf, VDEV_UBERBLOCK_SIZE(vd));
 }

@@ -242,10 +242,11 @@ struct vdev {
 	MIN(MAX((vd)->vdev_top->vdev_ashift, UBERBLOCK_SHIFT), \
 	    MAX_UBERBLOCK_SHIFT)
 #define	VDEV_UBERBLOCK_COUNT(vd)	\
-	(VDEV_UBERBLOCK_RING >> VDEV_UBERBLOCK_SHIFT(vd))
+	((VDEV_UBERBLOCK_RING >> VDEV_UBERBLOCK_SHIFT(vd)) - MMP_BLOCKS_PER_LABEL)
 #define	VDEV_UBERBLOCK_OFFSET(vd, n)	\
 	offsetof(vdev_label_t, vl_uberblock[(n) << VDEV_UBERBLOCK_SHIFT(vd)])
 #define	VDEV_UBERBLOCK_SIZE(vd)		(1ULL << VDEV_UBERBLOCK_SHIFT(vd))
+#define	VDEV_FIRST_MMP_BLOCK(vd)	VDEV_UBERBLOCK_COUNT(vd)
 
 typedef struct vdev_phys {
 	char		vp_nvlist[VDEV_PHYS_SIZE - sizeof (zio_eck_t)];

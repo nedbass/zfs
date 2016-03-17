@@ -2102,6 +2102,21 @@ dump_uberblock(uberblock_t *ub, const char *header, const char *footer)
 	(void) printf("\tguid_sum = %llu\n", (u_longlong_t)ub->ub_guid_sum);
 	(void) printf("\ttimestamp = %llu UTC = %s",
 	    (u_longlong_t)ub->ub_timestamp, asctime(localtime(&timestamp)));
+	(void) printf("\tmmp_open_id = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_open_id);
+	(void) printf("\tmmp_magic = %016llx\n", (u_longlong_t)ub->ub_mmp.mmp_magic);
+	(void) printf("\tmmp_seq = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_seq);
+	if (dump_opt['u'] >= 3) {
+		char blkbuf[BP_SPRINTF_LEN];
+		snprintf_blkptr(blkbuf, sizeof (blkbuf), &ub->ub_rootbp);
+		(void) printf("\trootbp = %s\n", blkbuf);
+	}
+	(void) printf("%s", footer ? footer : "");
+}
+
+static void
+dump_mmpblock(uberblock_t *ub, const char *header, const char *footer)
+{
+	dump_uberblock(ub, header, NULL);
 	(void) printf("\tmmp_magic = %016llx\n", (u_longlong_t)ub->ub_mmp.mmp_magic);
 	(void) printf("\tmmp_pool_guid = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_pool_guid);
 	(void) printf("\tmmp_open_id = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_open_id);
@@ -2111,11 +2126,6 @@ dump_uberblock(uberblock_t *ub, const char *header, const char *footer)
 	(void) printf("\tmmp_nodename = %s\n", ub->ub_mmp.mmp_nodename);
 	(void) printf("\tmmp_op = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_op);
 	(void) printf("\tmmp_first_txg = %llu\n", (u_longlong_t)ub->ub_mmp.mmp_first_txg);
-	if (dump_opt['u'] >= 3) {
-		char blkbuf[BP_SPRINTF_LEN];
-		snprintf_blkptr(blkbuf, sizeof (blkbuf), &ub->ub_rootbp);
-		(void) printf("\trootbp = %s\n", blkbuf);
-	}
 	(void) printf("%s", footer ? footer : "");
 }
 
@@ -2197,20 +2207,33 @@ dump_label_uberblocks(vdev_label_t *lbl, uint64_t ashift)
 	vdev_t vd;
 	vdev_t *vdp = &vd;
 	char header[ZDB_MAX_UB_HEADER_SIZE];
+	uint64_t uoff;
+	uberblock_t *ub;
 	int i;
 
 	vd.vdev_ashift = ashift;
 	vdp->vdev_top = vdp;
 
 	for (i = 0; i < VDEV_UBERBLOCK_COUNT(vdp); i++) {
-		uint64_t uoff = VDEV_UBERBLOCK_OFFSET(vdp, i);
-		uberblock_t *ub = (void *)((char *)lbl + uoff);
+		uoff = VDEV_UBERBLOCK_OFFSET(vdp, i);
+		ub = (void *)((char *)lbl + uoff);
 
-		if (uberblock_verify(ub))
+		if (uberblock_verify(ub) != 0)
 			continue;
 		(void) snprintf(header, ZDB_MAX_UB_HEADER_SIZE,
 		    "Uberblock[%d]\n", i);
 		dump_uberblock(ub, header, "");
+	}
+	for (i = 0; i < MMP_BLOCKS_PER_LABEL; i++) {
+		uoff = VDEV_UBERBLOCK_OFFSET(vdp, VDEV_FIRST_MMP_BLOCK(vdp) +
+		    i);
+		ub = (void *)((char *)lbl + uoff);
+
+		if (uberblock_verify(ub) != 0)
+			continue;
+		(void) snprintf(header, ZDB_MAX_UB_HEADER_SIZE,
+		    "MMP block[%d]\n", i);
+		dump_mmpblock(ub, header, "");
 	}
 }
 

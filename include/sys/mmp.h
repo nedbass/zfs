@@ -11,6 +11,7 @@ extern "C" {
 
 #define	MMP_MAGIC		0xa11cea11		/* all-see-all */
 #define	MMP_CLEAN_ID		0xc1e9b10c		/* clea(r/n)-block */
+#define	MMP_BLOCKS_PER_LABEL	3
 
 /*
  * MMP blocks may be written to disk by different processes.  Knowing which
