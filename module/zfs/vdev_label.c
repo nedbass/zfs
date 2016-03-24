@@ -1010,9 +1010,60 @@ vdev_mmpblock_foreign_id(vdev_t *rvd)
 			mmp_from_disk.mmp_seq, mmp_from_disk.mmp_op,
 			mmp_from_disk.mmp_nodename);
 		return (SET_ERROR(EBUSY)); /* XXX choose a good error */
-		}
+	}
 
 	return 0;
+}
+
+static void
+vdev_mmpblock_store_import_id_impl(zio_t *zio, vdev_t *vd, int flags)
+{
+	uberblock_t *ubbuf;
+	int c, l, mmp_block_index;
+
+	for (c = 0; c < vd->vdev_children; c++)
+		vdev_mmpblock_store_import_id_impl(zio, vd->vdev_child[c], flags);
+
+	if (!vd->vdev_ops->vdev_op_leaf)
+		return;
+
+	if (!vdev_writeable(vd))
+		return;
+
+	ubbuf = zio_buf_alloc(VDEV_UBERBLOCK_SIZE(vd));
+	bzero(ubbuf, VDEV_UBERBLOCK_SIZE(vd));
+	ubbuf->ub_mmp.mmp_open_id = vd->vdev_spa->spa_mmp.mmp_open_id;
+	ubbuf->ub_mmp.mmp_op = MO_IMPORT_ATTEMPT;
+	ubbuf->ub_magic = UBERBLOCK_MAGIC;
+
+	for (l = 0; l < VDEV_LABELS; l++) {
+		int m;
+		for (m = 0; m < MMP_BLOCKS_PER_LABEL; m++) {
+			mmp_block_index = VDEV_FIRST_MMP_BLOCK(vd) + m;
+			vdev_label_write(zio, vd, l, ubbuf,
+			    VDEV_UBERBLOCK_OFFSET(vd, mmp_block_index),
+			    VDEV_UBERBLOCK_SIZE(vd), NULL, zio->io_private,
+			    flags | ZIO_FLAG_DONT_PROPAGATE);
+		}
+	}
+
+	zio_buf_free(ubbuf, VDEV_UBERBLOCK_SIZE(vd));
+}
+
+void
+vdev_mmpblock_store_import_id(vdev_t *rvd)
+{
+	zio_t *zio;
+	spa_t *spa = rvd->vdev_spa;
+	int flags = ZIO_FLAG_CONFIG_WRITER | ZIO_FLAG_CANFAIL |
+	    ZIO_FLAG_SPECULATIVE | ZIO_FLAG_TRYHARD;
+
+	spa_config_enter(spa, SCL_ALL, FTAG, RW_WRITER);
+	zio = zio_root(spa, NULL, NULL, flags);
+	vdev_mmpblock_store_import_id_impl(zio, rvd, flags);
+	(void) zio_wait(zio);
+
+	spa_config_exit(spa, SCL_ALL, FTAG);
 }
 
 /*
