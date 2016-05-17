@@ -1151,6 +1151,13 @@ dmu_objset_sync(objset_t *os, zio_t *pio, dmu_tx_t *tx)
 		if (dr->dr_zio)
 			zio_nowait(dr->dr_zio);
 	}
+
+	/* Enable dnode backfill if enough objects have been freed. */
+	if (os->os_freed_dnodes >= OBJSET_RESCAN_DNODE_THRESHOLD) {
+		os->os_rescan_dnodes = B_TRUE;
+		os->os_freed_dnodes = 0;
+	}
+
 	/*
 	 * Free intent log blocks up to this tx.
 	 */

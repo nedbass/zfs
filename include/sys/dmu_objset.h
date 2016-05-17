@@ -57,6 +57,9 @@ struct dmu_tx;
 
 #define	OBJSET_FLAG_USERACCOUNTING_COMPLETE	(1ULL<<0)
 
+/* Backfill lower metadnode objects after this many have been freed. */
+#define	OBJSET_RESCAN_DNODE_THRESHOLD	4096
+
 typedef struct objset_phys {
 	dnode_phys_t os_meta_dnode;
 	zil_header_t os_zil_header;
@@ -106,6 +109,8 @@ struct objset {
 	zil_header_t os_zil_header;
 	list_t os_synced_dnodes;
 	uint64_t os_flags;
+	uint64_t os_freed_dnodes;
+	boolean_t os_rescan_dnodes;
 
 	/* Protected by os_obj_lock */
 	kmutex_t os_obj_lock;
