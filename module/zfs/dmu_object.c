@@ -30,6 +30,7 @@
 #include <sys/dnode.h>
 #include <sys/zap.h>
 #include <sys/zfeature.h>
+#include <sys/dsl_dataset.h>
 
 uint64_t
 dmu_object_alloc(objset_t *os, dmu_object_type_t ot, int blocksize,
@@ -58,16 +59,23 @@ dmu_object_alloc_dnsize(objset_t *os, dmu_object_type_t ot, int blocksize,
 
 	mutex_enter(&os->os_obj_lock);
 	for (;;) {
+		struct dsl_dataset *ds = os->os_dsl_dataset;
+		int tries = 0;
+		int max_tries = 32;
+		boolean_t restarted = B_FALSE;
+
 		object = os->os_obj_next;
 		/*
 		 * Each time we polish off a L1 bp worth of dnodes (2^12
-		 * objects), move to another L1 bp that's still reasonably
-		 * sparse (at most 1/4 full). Look from the beginning at most
-		 * once per txg, but after that keep looking from here.
-		 * os_scan_dnodes is set during txg sync if enough objects
-		 * have been freed since the previous rescan to justify
-		 * backfilling again. If we can't find a suitable block, just
-		 * keep going from here.
+		 * objects), or we've failed repeatedly to hold a dnode from
+		 * the current block, move to another L1 bp that's still
+		 * reasonably sparse (at most 1/4 full). If we still fail
+		 * repeatedly, look for an empty L1 bp. Look from the beginning
+		 * at most once per txg, but after that keep looking from here.
+		 * os_scan_dnodes is set during txg sync if enough objects have
+		 * been freed since the previous rescan to justify backfilling
+		 * again. If we can't find a suitable block, just keep going
+		 * from here.
 		 *
 		 * Note that dmu_traverse depends on the behavior that we use
 		 * multiple blocks of the dnode object before going back to
@@ -75,21 +83,25 @@ dmu_object_alloc_dnsize(objset_t *os, dmu_object_type_t ot, int blocksize,
 		 * that property or find another solution to the issues
 		 * described in traverse_visitbp.
 		 */
-
-		if (P2PHASE(object, L1_dnode_count) == 0) {
+		if ((P2PHASE(object, L1_dnode_count) == 0) ||
+		    tries >= max_tries) {
 			uint64_t offset;
+			uint64_t blkfill;
 			int error;
+
 			if (os->os_rescan_dnodes) {
 				offset = 0;
 				os->os_rescan_dnodes = B_FALSE;
 			} else {
 				offset = object << DNODE_SHIFT;
 			}
+			blkfill = restarted ? 0 : DNODES_PER_BLOCK >> 2;
 			error = dnode_next_offset(DMU_META_DNODE(os),
-			    DNODE_FIND_HOLE,
-			    &offset, 2, DNODES_PER_BLOCK >> 2, 0);
+			    DNODE_FIND_HOLE, &offset, 2, blkfill, 0);
 			if (error == 0)
 				object = offset >> DNODE_SHIFT;
+			restarted = B_TRUE;
+			tries = 0;
 		}
 		os->os_obj_next = object + dn_slots;
 
@@ -104,10 +116,15 @@ dmu_object_alloc_dnsize(objset_t *os, dmu_object_type_t ot, int blocksize,
 		if (dn)
 			break;
 
-		/*
-		 * Round up to the next known valid starting point for dnode.
-		 */
-		os->os_obj_next = P2ROUNDUP(object + 1, DNODES_PER_BLOCK);
+		if (dmu_object_next(os, &object, B_TRUE, 0) == 0)
+			os->os_obj_next = object - 1;
+		else if (ds->ds_feature_inuse[SPA_FEATURE_LARGE_DNODE])
+			/*
+			 * Skip to next known valid dnode starting point.
+			 */
+			os->os_obj_next = P2ROUNDUP(object + 1,
+			    DNODES_PER_BLOCK);
+		tries++;
 	}
 
 	dnode_allocate(dn, ot, blocksize, 0, bonustype, bonuslen, dn_slots, tx);
@@ -219,16 +236,26 @@ dmu_object_next(objset_t *os, uint64_t *objectp, boolean_t hole, uint64_t txg)
 {
 	uint64_t offset;
 	dmu_object_info_t doi;
-	int error;
+	struct dsl_dataset *ds = os->os_dsl_dataset;
+	int dnodesize = DNODE_MIN_SIZE;
+	int error = 0;
 
-	error = dmu_object_info(os, *objectp, &doi);
+	/*
+	 * Don't call dmu_object_info() if this dataset doesn't use large
+	 * dnodes to avoid the unnecessary expense of taking a dnode hold.
+	 */
+	if (ds && ds->ds_feature_inuse[SPA_FEATURE_LARGE_DNODE]) {
+		error = dmu_object_info(os, *objectp, &doi);
+		if (error && !(error == EINVAL && *objectp == 0))
+			return (SET_ERROR(error));
+		else
+			dnodesize = doi.doi_dnodesize;
+	}
 
-	if (error && !(error == EINVAL && *objectp == 0))
-		return (SET_ERROR(error));
-	else if (*objectp == 0)
+	if (*objectp == 0)
 		offset = 1 << DNODE_SHIFT;
 	else
-		offset = (*objectp << DNODE_SHIFT) + doi.doi_dnodesize;
+		offset = (*objectp << DNODE_SHIFT) + dnodesize;
 
 	error = dnode_next_offset(DMU_META_DNODE(os),
 	    (hole ? DNODE_FIND_HOLE : 0), &offset, 0, DNODES_PER_BLOCK, txg);
