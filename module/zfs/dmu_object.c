@@ -105,10 +105,14 @@ dmu_object_alloc_dnsize(objset_t *os, dmu_object_type_t ot, int blocksize,
 		if (dn)
 			break;
 
-		/*
-		 * Skip to next known valid dnode starting point.
-		 */
-		os->os_obj_next = P2ROUNDUP(object + 1, DNODES_PER_BLOCK);
+		if (dmu_object_next(os, &object, B_TRUE, 0) == 0)
+			os->os_obj_next = object;
+		else
+			/*
+			 * Skip to next known valid starting point for a dnode.
+			 */
+			os->os_obj_next = P2ROUNDUP(object + 1,
+			    DNODES_PER_BLOCK);
 	}
 
 	dnode_allocate(dn, ot, blocksize, 0, bonustype, bonuslen, dn_slots, tx);
