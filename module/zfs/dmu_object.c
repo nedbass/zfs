@@ -224,16 +224,27 @@ dmu_object_next(objset_t *os, uint64_t *objectp, boolean_t hole, uint64_t txg)
 {
 	uint64_t offset;
 	dmu_object_info_t doi;
+	struct dsl_dataset *ds = os->os_dsl_dataset;
+	int dnodesize;
 	int error;
 
-	error = dmu_object_info(os, *objectp, &doi);
+	/*
+	 * Avoid expensive dnode hold if this dataset doesn't use large dnodes.
+	 */
+	if (ds && ds->ds_feature_inuse[SPA_FEATURE_LARGE_DNODE]) {
+		error = dmu_object_info(os, *objectp, &doi);
+		if (error && !(error == EINVAL && *objectp == 0))
+			return (SET_ERROR(error));
+		else
+			dnodesize = doi.doi_dnodesize;
+	} else {
+		dnodesize = DNODE_MIN_SIZE;
+	}
 
-	if (error && !(error == EINVAL && *objectp == 0))
-		return (SET_ERROR(error));
-	else if (*objectp == 0)
+	if (*objectp == 0)
 		offset = 1 << DNODE_SHIFT;
 	else
-		offset = (*objectp << DNODE_SHIFT) + doi.doi_dnodesize;
+		offset = (*objectp << DNODE_SHIFT) + dnodesize;
 
 	error = dnode_next_offset(DMU_META_DNODE(os),
 	    (hole ? DNODE_FIND_HOLE : 0), &offset, 0, DNODES_PER_BLOCK, txg);
