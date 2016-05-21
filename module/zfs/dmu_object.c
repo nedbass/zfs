@@ -49,6 +49,7 @@ dmu_object_alloc_dnsize(objset_t *os, dmu_object_type_t ot, int blocksize,
 	    (DMU_META_DNODE(os)->dn_indblkshift - SPA_BLKPTRSHIFT);
 	dnode_t *dn = NULL;
 	int dn_slots = dnodesize >> DNODE_SHIFT;
+	boolean_t restarted = B_FALSE;
 
 	if (dn_slots == 0) {
 		dn_slots = DNODE_MIN_SLOTS;
@@ -62,13 +63,22 @@ dmu_object_alloc_dnsize(objset_t *os, dmu_object_type_t ot, int blocksize,
 		object = os->os_obj_next;
 		/*
 		 * Each time we polish off a L1 bp worth of dnodes (2^12
-		 * objects), move to another L1 bp that's still reasonably
-		 * sparse (at most 1/4 full). Look from the beginning at most
-		 * once per txg, but after that keep looking from here.
+		 * objects), move to another L1 bp that's still
+		 * reasonably sparse (at most 1/4 full). Look from the
+		 * beginning at most once per txg. If we still can't
+		 * allocate from that L1 block, search for an empty L0
+		 * block, which will quickly skip to the end of the
+		 * metadnode if the no nearby L0 blocks are empty. This
+		 * fallback avoids a pathology where full dnode blocks
+		 * containing large dnodes appear sparse because they
+		 * have a low blk_fill, leading to many failed
+		 * allocation attempts. In the long term a better
+		 * mechanism to search for sparse metadnode regions,
+		 * such as spacemaps, could be implemented.
+		 *
 		 * os_scan_dnodes is set during txg sync if enough objects
 		 * have been freed since the previous rescan to justify
-		 * backfilling again. If we can't find a suitable block, just
-		 * keep going from here.
+		 * backfilling again.
 		 *
 		 * Note that dmu_traverse depends on the behavior that we use
 		 * multiple blocks of the dnode object before going back to
@@ -76,9 +86,10 @@ dmu_object_alloc_dnsize(objset_t *os, dmu_object_type_t ot, int blocksize,
 		 * that property or find another solution to the issues
 		 * described in traverse_visitbp.
 		 */
-
 		if (P2PHASE(object, L1_dnode_count) == 0) {
 			uint64_t offset;
+			uint64_t blkfill;
+			int minlvl;
 			int error;
 			if (os->os_rescan_dnodes) {
 				offset = 0;
@@ -86,9 +97,11 @@ dmu_object_alloc_dnsize(objset_t *os, dmu_object_type_t ot, int blocksize,
 			} else {
 				offset = object << DNODE_SHIFT;
 			}
+			blkfill = restarted ? 1 : DNODES_PER_BLOCK;
+			minlvl = restarted ? 1 : 2;
+			restarted = B_TRUE;
 			error = dnode_next_offset(DMU_META_DNODE(os),
-			    DNODE_FIND_HOLE,
-			    &offset, 2, DNODES_PER_BLOCK >> 2, 0);
+			    DNODE_FIND_HOLE, &offset, minlvl, blkfill, 0);
 			if (error == 0)
 				object = offset >> DNODE_SHIFT;
 		}
