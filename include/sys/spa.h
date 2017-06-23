@@ -725,6 +725,7 @@ typedef struct spa_stats {
 	spa_stats_history_t	txg_history;
 	spa_stats_history_t	tx_assign_histogram;
 	spa_stats_history_t	io_history;
+	spa_stats_history_t	mmp_history;
 } spa_stats_t;
 
 typedef enum txg_state {
@@ -754,6 +755,8 @@ extern txg_stat_t *spa_txg_history_init_io(spa_t *, uint64_t,
     struct dsl_pool *);
 extern void spa_txg_history_fini_io(spa_t *, txg_stat_t *);
 extern void spa_tx_assign_add_nsecs(spa_t *spa, uint64_t nsecs);
+extern void spa_mmp_history_add(uint64_t txg, uint64_t timestamp,
+    uint64_t mmp_delay, vdev_t *vd, int label);
 
 /* Pool configuration locks */
 extern int spa_config_tryenter(spa_t *spa, int locks, void *tag, krw_t rw);

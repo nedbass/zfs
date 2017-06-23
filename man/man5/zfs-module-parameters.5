@@ -2092,6 +2092,18 @@ Use \fB1\fR for yes and \fB0\fR for no (default).
 .sp
 .ne 2
 .na
+\fBzfs_mmp_history\fR (int)
+.ad
+.RS 12n
+Historic statistics for the last N MMP updates will be available in
+\fR/proc/spl/kstat/zfs/POOLNAME/mmp\fB
+.sp
+Default value: \fB0\fR.
+.RE
+
+.sp
+.ne 2
+.na
 \fBzfs_mmp_interval\fR (ulong)
 .ad
 .RS 12n

@@ -409,6 +409,7 @@ mmp_write_uberblock(spa_t *spa)
 	mmp_thread_state_t *mmp = &spa->spa_mmp;
 	uberblock_t *ub;
 	vdev_t *vd;
+	int label;
 	uint64_t offset;
 
 	vd = vdev_random_leaf(spa);
@@ -437,9 +438,13 @@ mmp_write_uberblock(spa_t *spa)
 	offset = VDEV_UBERBLOCK_OFFSET(vd, VDEV_FIRST_MMP_BLOCK(vd) +
 	    spa_get_random(MMP_BLOCKS_PER_LABEL));
 
-	vdev_label_write(zio, vd, spa_get_random(VDEV_LABELS),
-	    ub_abd, offset, VDEV_UBERBLOCK_SIZE(vd), mmp_write_done, mmp,
+	label = spa_get_random(VDEV_LABELS);
+	vdev_label_write(zio, vd, label, ub_abd, offset,
+	    VDEV_UBERBLOCK_SIZE(vd), mmp_write_done, mmp,
 	    flags | ZIO_FLAG_DONT_PROPAGATE);
+
+	spa_mmp_history_add(ub->ub_txg, ub->ub_timestamp, ub->ub_mmp_delay, vd,
+	    label);
 
 	zio_nowait(zio);
 }
